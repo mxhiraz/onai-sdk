@@ -59,8 +59,11 @@ export type {
 } from "./resources/characters.js";
 export type {
   BetaVideoOptionsInput,
+  BulkImageGenerationResult,
+  BulkImageGenerationRowInput,
   GenerationAspectRatio,
   GetImageGenerationInput,
+  GenerateBulkImagesInput,
   GenerateBetaVideoInput,
   GenerateImageInput,
   ImageCooldownStatusInput,

@@ -1,3 +1,5 @@
+import { randomUUID } from "node:crypto";
+
 import type { CustomModel, CustomModelType } from "../internal/custom-models.js";
 import { OnaiApiError, OnaiValidationError } from "../internal/errors.js";
 import type { SantosGraphqlClient } from "../internal/graphql.js";
@@ -124,6 +126,28 @@ export interface GenerateImageInput {
   bulkGenerationId?: string;
 }
 
+export interface BulkImageGenerationRowInput {
+  productModelIds?: string[];
+  characterModelIds?: string[];
+}
+
+export interface GenerateBulkImagesInput {
+  prompt: string;
+  workspaceId?: string;
+  aspectRatio?: ImageGenerationAspectRatio;
+  mode?: ImageGenerationMode;
+  samples?: ImageGenerationVersion;
+  maxRes?: boolean;
+  bulkGenerationId?: string;
+  rows: BulkImageGenerationRowInput[];
+}
+
+export interface BulkImageGenerationResult {
+  bulkGenerationId: string;
+  imageGenerations: ImageGeneration[];
+  __typename?: string;
+}
+
 export interface ImageCooldownStatusInput {
   workspaceId?: string;
 }
@@ -154,6 +178,7 @@ export interface WaitForImageGenerationInput extends GetImageGenerationInput {
 
 export interface WaitForBatchImageGenerationsInput extends WaitForImageGenerationInput {
   limit?: number;
+  pageSize?: number;
   maxPages?: number;
   onProgress?: (id: string, generation: ImageGeneration) => void | Promise<void>;
   onReady?: (id: string, generation: ImageGeneration) => void | Promise<void>;
@@ -298,6 +323,14 @@ interface ImageGenerationCreateResponse {
   imageGenerationCreate: ImageGeneration;
 }
 
+interface ImageGenerationBulkCreateResponse {
+  imageGenerationBulkCreate: BulkImageGenerationResult;
+}
+
+interface ImageGenerationResponse {
+  imageGeneration: ImageGeneration | null;
+}
+
 interface ImageGenerationsResponse {
   imageGenerations: ImageGenerationsPage;
 }
@@ -315,6 +348,13 @@ interface CreateGenerationRequest {
   aspectRatio?: GenerationAspectRatio | undefined;
   samples?: ImageGenerationVersion | undefined;
   videoOptions?: BetaVideoOptionsInput | undefined;
+}
+
+interface BulkCreateGenerationsRequest {
+  graphql: SantosGraphqlClient;
+  logger: ResolvedOnaiLogger;
+  defaultWorkspaceId: string;
+  input: GenerateBulkImagesInput;
 }
 
 export class ImagesResource {
@@ -342,6 +382,19 @@ export class ImagesResource {
 
   create(input: GenerateImageInput): Promise<ImageGeneration> {
     return this.generate(input);
+  }
+
+  async bulkGenerate(input: GenerateBulkImagesInput): Promise<BulkImageGenerationResult> {
+    return bulkCreateGenerations({
+      graphql: this.graphql,
+      logger: this.logger,
+      defaultWorkspaceId: this.workspaceId,
+      input,
+    });
+  }
+
+  bulkCreate(input: GenerateBulkImagesInput): Promise<BulkImageGenerationResult> {
+    return this.bulkGenerate(input);
   }
 
   async list(input: ListImageGenerationsInput = {}): Promise<ImageGeneration[]> {
@@ -615,6 +668,60 @@ async function createGeneration(request: CreateGenerationRequest): Promise<Image
   return generation;
 }
 
+async function bulkCreateGenerations(request: BulkCreateGenerationsRequest): Promise<BulkImageGenerationResult> {
+  const input = request.input;
+  const workspaceId = requireNonEmpty(input.workspaceId ?? request.defaultWorkspaceId, "workspaceId");
+  const bulkGenerationId = requireNonEmpty(input.bulkGenerationId ?? randomUUID(), "bulkGenerationId");
+  const rows = normalizeBulkRows(input.rows);
+  const startedAt = Date.now();
+
+  request.logger.info(
+    {
+      event: "generation.bulk_create.start",
+      workspaceId,
+      bulkGenerationId,
+      rowCount: rows.length,
+      aspectRatio: input.aspectRatio,
+      mode: input.mode ?? ImageGenerationMode.Default,
+      samples: input.samples ?? ImageGenerationVersion.Images1,
+    },
+    "Santos bulk generation create started.",
+  );
+
+  const data = await request.graphql.request<ImageGenerationBulkCreateResponse>({
+    operationName: "imageGenerationBulkCreate",
+    variables: {
+      workspaceId,
+      prompt: requireNonEmpty(input.prompt, "prompt"),
+      aspectRatio: input.aspectRatio,
+      mode: input.mode ?? ImageGenerationMode.Default,
+      samples: input.samples ?? ImageGenerationVersion.Images1,
+      maxRes: input.maxRes,
+      bulkGenerationId,
+      rows,
+    },
+    query: IMAGE_GENERATION_BULK_CREATE_MUTATION,
+  });
+
+  const result = {
+    ...data.imageGenerationBulkCreate,
+    imageGenerations: data.imageGenerationBulkCreate.imageGenerations.map(normalizeGenerationOutput),
+  };
+
+  request.logger.info(
+    {
+      event: "generation.bulk_create.success",
+      workspaceId,
+      bulkGenerationId: result.bulkGenerationId,
+      generationCount: result.imageGenerations.length,
+      durationMs: Date.now() - startedAt,
+    },
+    "Santos bulk generation created.",
+  );
+
+  return result;
+}
+
 interface GenerationLookupRequest<TInput extends GetImageGenerationInput | WaitForImageGenerationInput> {
   graphql: SantosGraphqlClient;
   logger: ResolvedOnaiLogger;
@@ -731,15 +838,41 @@ async function listAllGenerations(request: ListGenerationsRequest): Promise<Imag
 async function getGeneration(
   request: GenerationLookupRequest<GetImageGenerationInput>,
 ): Promise<ImageGeneration | null> {
-  const imageGenerations = await listAllGenerations({
-    graphql: request.graphql,
-    logger: request.logger,
-    defaultWorkspaceId: request.defaultWorkspaceId,
-    input: generationLookupInput(request),
-    forcedAssetType: request.forcedAssetType,
+  const id = requireNonEmpty(request.id, "id");
+  const startedAt = Date.now();
+  request.logger.debug(
+    {
+      event: "generation.get.start",
+      generationId: id,
+      assetType: request.forcedAssetType,
+    },
+    "Santos generation fetch started.",
+  );
+
+  const data = await request.graphql.request<ImageGenerationResponse>({
+    operationName: "imageGeneration",
+    variables: {
+      id,
+    },
+    query: IMAGE_GENERATION_QUERY,
   });
 
-  return imageGenerations[0] ?? null;
+  const generation = data.imageGeneration ? normalizeGenerationOutput(data.imageGeneration) : null;
+  const matchingGeneration =
+    generation && (!request.forcedAssetType || generation.assetType === request.forcedAssetType) ? generation : null;
+
+  request.logger.debug(
+    {
+      event: "generation.get.success",
+      generationId: id,
+      status: matchingGeneration?.status ?? null,
+      found: Boolean(matchingGeneration),
+      durationMs: Date.now() - startedAt,
+    },
+    "Santos generation fetch completed.",
+  );
+
+  return matchingGeneration;
 }
 
 async function waitForGeneration(
@@ -840,6 +973,7 @@ async function waitForGenerationBatch(request: GenerationBatchLookupRequest): Pr
   const timeoutMs = normalizePositiveNumber(request.input.timeoutMs ?? 180_000, "timeoutMs");
   const intervalMs = normalizePositiveNumber(request.input.intervalMs ?? 3_000, "intervalMs");
   const pageLimit = normalizePositiveInteger(request.input.limit ?? Math.max(ids.length, 20), "limit");
+  const pageSize = normalizePositiveInteger(request.input.pageSize ?? pageLimit, "pageSize");
   const maxPages = normalizePositiveInteger(request.input.maxPages ?? 1, "maxPages");
   const readyGenerations = new Map<string, ImageGeneration>();
   const failedGenerations = new Map<string, { generation: ImageGeneration; reason: string }>();
@@ -853,6 +987,7 @@ async function waitForGenerationBatch(request: GenerationBatchLookupRequest): Pr
       timeoutMs,
       intervalMs,
       pageLimit,
+      pageSize,
       maxPages,
       assetType: request.forcedAssetType,
     },
@@ -863,7 +998,7 @@ async function waitForGenerationBatch(request: GenerationBatchLookupRequest): Pr
     const listInput: ListImageGenerationsInput = {
       ids,
       limit: pageLimit,
-      pageSize: pageLimit,
+      pageSize,
       maxPages,
     };
 
@@ -977,22 +1112,6 @@ async function waitForGenerationBatch(request: GenerationBatchLookupRequest): Pr
   });
 }
 
-function generationLookupInput(
-  request: GenerationLookupRequest<GetImageGenerationInput | WaitForImageGenerationInput>,
-): ListImageGenerationsInput {
-  const input: ListImageGenerationsInput = {
-    id: requireNonEmpty(request.id, "id"),
-    limit: 1,
-    pageSize: 20,
-  };
-
-  if (request.input.workspaceId) {
-    input.workspaceId = request.input.workspaceId;
-  }
-
-  return input;
-}
-
 function filterGenerationsPage(
   page: ImageGenerationsPage,
   input: ListImageGenerationsInput,
@@ -1066,6 +1185,47 @@ function normalizeModelConfig(model: ImageGenerationModelConfig): ImageGeneratio
     imageUrl: requireNonEmpty(model.imageUrl, "models[].imageUrl"),
     modelType: model.modelType,
   };
+}
+
+function normalizeBulkRows(rows: BulkImageGenerationRowInput[]): BulkImageGenerationRowInput[] {
+  if (!Array.isArray(rows) || rows.length === 0) {
+    throw new OnaiValidationError("rows must include at least one bulk generation row.");
+  }
+
+  return rows.map((row, rowIndex) => {
+    const productModelIds = normalizeOptionalStringList(row.productModelIds, `rows[${rowIndex}].productModelIds`);
+    const characterModelIds = normalizeOptionalStringList(row.characterModelIds, `rows[${rowIndex}].characterModelIds`);
+
+    if (!productModelIds && !characterModelIds) {
+      throw new OnaiValidationError(
+        `rows[${rowIndex}] must include at least one productModelId or characterModelId.`,
+      );
+    }
+
+    const normalizedRow: BulkImageGenerationRowInput = {};
+
+    if (productModelIds) {
+      normalizedRow.productModelIds = productModelIds;
+    }
+
+    if (characterModelIds) {
+      normalizedRow.characterModelIds = characterModelIds;
+    }
+
+    return normalizedRow;
+  });
+}
+
+function normalizeOptionalStringList(values: string[] | undefined, field: string): string[] | undefined {
+  if (values === undefined) {
+    return undefined;
+  }
+
+  if (!Array.isArray(values) || values.length === 0) {
+    throw new OnaiValidationError(`${field} must include at least one id when provided.`);
+  }
+
+  return values.map((value, index) => requireNonEmpty(value, `${field}[${index}]`));
 }
 
 function normalizeOptionalGenerationIds(ids: string[] | undefined, field: string): Set<string> | undefined {
@@ -1289,6 +1449,112 @@ fragment StudioThumbnailFields on StudioThumbnail {
   url
   __typename
 }`;
+
+const IMAGE_GENERATION_LOOKUP_FIELDS_FRAGMENT = `fragment ImageGenerationLookupFields on ImageGeneration {
+  id
+  promptRaw
+  promptDisplay
+  status
+  statusMessage
+  retryable
+  workspaceId
+  output {
+    id
+    seed
+    url
+    originalUrl
+    thumbnailUrl
+    durationMs
+    displayModelName
+    optimizedPrompt
+    mlOptimizerName
+    startFrameUrl
+    startFrameOptimizedPrompt
+    deleted
+    deletedAt
+    __typename
+  }
+  options {
+    samples
+    maxRes
+    mode
+    studioIds
+    videoOptions {
+      startFrameUrl
+      endFrameUrl
+      cameraMotion
+      duration
+      withAudio
+      __typename
+    }
+    canvasSize {
+      width
+      height
+      __typename
+    }
+    __typename
+  }
+  aspectRatio
+  styleImageUrls
+  createdAt
+  updatedAt
+  objectControlMode
+  controlImages {
+    imageUrl
+    maskedControlImageUrl
+    objectSize {
+      width
+      height
+      __typename
+    }
+    objectPosition {
+      x
+      y
+      __typename
+    }
+    objectRotation
+    __typename
+  }
+  assetType
+  studioIds
+  deleted
+  sourceTaskId
+  taskId
+  bulkGenerationId
+  createdBy {
+    id
+    uid
+    email
+    displayName
+    firstName
+    photoURL
+    handle
+    __typename
+  }
+  __typename
+}`;
+
+const IMAGE_GENERATION_QUERY = `query imageGeneration($id: String!) {
+  imageGeneration(input: {id: $id}) {
+    ...ImageGenerationLookupFields
+  }
+}
+
+${IMAGE_GENERATION_LOOKUP_FIELDS_FRAGMENT}`;
+
+const IMAGE_GENERATION_BULK_CREATE_MUTATION = `mutation imageGenerationBulkCreate($prompt: String!, $workspaceId: String!, $aspectRatio: String, $mode: String, $samples: Int, $maxRes: Boolean, $bulkGenerationId: String!, $rows: [BulkGenerationRowInput!]!) {
+  imageGenerationBulkCreate(
+    input: {prompt: $prompt, workspaceId: $workspaceId, aspectRatio: $aspectRatio, mode: $mode, samples: $samples, maxRes: $maxRes, bulkGenerationId: $bulkGenerationId, rows: $rows}
+  ) {
+    bulkGenerationId
+    imageGenerations {
+      ...ImageGenerationLookupFields
+    }
+    __typename
+  }
+}
+
+${IMAGE_GENERATION_LOOKUP_FIELDS_FRAGMENT}`;
 
 const IMAGE_GENERATIONS_QUERY = `query imageGenerations($workspaceId: String!, $first: Int!, $cursor: String) {
   imageGenerations(input: {workspaceId: $workspaceId, first: $first, cursor: $cursor}) {

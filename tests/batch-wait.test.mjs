@@ -44,8 +44,8 @@ test("images.list filters multiple ids from one history request", async () => {
   );
 });
 
-test("images.get fetches a practical history page while returning one matching generation", async () => {
-  let historyCalls = 0;
+test("images.get fetches one generation by id without scanning history", async () => {
+  let getCalls = 0;
   const onai = createOnaiClient({
     firebaseApiKey: "firebase-api-key",
     workspaceId: "workspace-id",
@@ -56,17 +56,13 @@ test("images.get fetches a practical history page while returning one matching g
     },
     fetch: async (_url, init) => {
       const request = JSON.parse(String(init.body));
-      assert.equal(request.operationName, "imageGenerations");
-      assert.equal(request.variables.first, 20);
-      historyCalls += 1;
+      assert.equal(request.operationName, "imageGeneration");
+      assert.equal(request.variables.id, "gen-c");
+      getCalls += 1;
 
       return jsonResponse({
         data: {
-          imageGenerations: generationPage([
-            generation("gen-a", "READY"),
-            generation("gen-b", "READY"),
-            generation("gen-c", "READY"),
-          ]),
+          imageGeneration: generation("gen-c", "READY"),
         },
       });
     },
@@ -74,8 +70,73 @@ test("images.get fetches a practical history page while returning one matching g
 
   const generationResult = await onai.images.get("gen-c");
 
-  assert.equal(historyCalls, 1);
+  assert.equal(getCalls, 1);
   assert.equal(generationResult?.id, "gen-c");
+});
+
+test("images.bulkGenerate creates multiple generation rows in one request", async () => {
+  let createCalls = 0;
+  const onai = createOnaiClient({
+    firebaseApiKey: "firebase-api-key",
+    workspaceId: "workspace-id",
+    authTokenState: {
+      accessToken: "access-token",
+      accessTokenExpiresAt: Date.now() + 3_600_000,
+      refreshToken: "refresh-token",
+    },
+    fetch: async (_url, init) => {
+      const request = JSON.parse(String(init.body));
+      assert.equal(request.operationName, "imageGenerationBulkCreate");
+      assert.equal(request.variables.prompt, "catalog shot");
+      assert.equal(request.variables.bulkGenerationId, "shoot-1");
+      assert.deepEqual(request.variables.rows, [
+        {
+          productModelIds: ["product-a"],
+          characterModelIds: ["character-a"],
+        },
+        {
+          productModelIds: ["product-b"],
+          characterModelIds: ["character-a"],
+        },
+      ]);
+      createCalls += 1;
+
+      return jsonResponse({
+        data: {
+          imageGenerationBulkCreate: {
+            bulkGenerationId: "shoot-1",
+            imageGenerations: [
+              generation("bulk-a", "PENDING", null, "shoot-1"),
+              generation("bulk-b", "PENDING", null, "shoot-1"),
+            ],
+            __typename: "ImageGenerationBulkCreatePayload",
+          },
+        },
+      });
+    },
+  });
+
+  const result = await onai.images.bulkGenerate({
+    prompt: "catalog shot",
+    bulkGenerationId: "shoot-1",
+    rows: [
+      {
+        productModelIds: ["product-a"],
+        characterModelIds: ["character-a"],
+      },
+      {
+        productModelIds: ["product-b"],
+        characterModelIds: ["character-a"],
+      },
+    ],
+  });
+
+  assert.equal(createCalls, 1);
+  assert.equal(result.bulkGenerationId, "shoot-1");
+  assert.deepEqual(
+    result.imageGenerations.map((item) => item.id),
+    ["bulk-a", "bulk-b"],
+  );
 });
 
 test("waitForBatch polls all ids with one history request per interval", async () => {
@@ -167,7 +228,7 @@ test("waitForBatch reports terminal failures without polling each id separately"
   assert.deepEqual(failed, ["gen-b:bad prompt"]);
 });
 
-function generation(id, status, statusMessage = null) {
+function generation(id, status, statusMessage = null, bulkGenerationId = null) {
   return {
     id,
     promptRaw: "",
@@ -198,6 +259,7 @@ function generation(id, status, statusMessage = null) {
     assetType: "IMAGE",
     studioIds: [],
     deleted: false,
+    bulkGenerationId,
     __typename: "ImageGeneration",
   };
 }

@@ -1,6 +1,6 @@
 {
   "name": "onai-sdk",
-  "version": "0.1.9",
+  "version": "0.1.10",
   "description": "Server-side TypeScript SDK for image generation workflows.",
   "type": "module",
   "main": "./dist/index.js",
