@@ -31,7 +31,7 @@ The SDK must never run in browser code because it handles refresh tokens. Every 
 The current release path is GitHub. Install a pinned release tag in backend projects:
 
 ```bash
-npm install github:mxhiraz/onai-sdk#v0.1.10
+npm install github:mxhiraz/onai-sdk#v0.1.11
 ```
 
 In `package.json`:
@@ -39,7 +39,7 @@ In `package.json`:
 ```json
 {
   "dependencies": {
-    "onai-sdk": "github:mxhiraz/onai-sdk#v0.1.10"
+    "onai-sdk": "github:mxhiraz/onai-sdk#v0.1.11"
   }
 }
 ```
@@ -47,7 +47,7 @@ In `package.json`:
 You can also install from the HTTPS Git URL:
 
 ```bash
-npm install git+https://github.com/mxhiraz/onai-sdk.git#v0.1.10
+npm install git+https://github.com/mxhiraz/onai-sdk.git#v0.1.11
 ```
 
 The package includes a `prepare` script, so GitHub installs build `dist` automatically before the SDK is packed for the consuming project.
@@ -160,15 +160,15 @@ git push
 Optional version tag:
 
 ```bash
-git tag v0.1.10
-git push origin v0.1.10
+git tag v0.1.11
+git push origin v0.1.11
 ```
 
 Downstream apps can install a branch, tag, or commit:
 
 ```bash
 npm install github:mxhiraz/onai-sdk#main
-npm install github:mxhiraz/onai-sdk#v0.1.10
+npm install github:mxhiraz/onai-sdk#v0.1.11
 npm install git+https://github.com/mxhiraz/onai-sdk.git#<commit-sha>
 ```
 
@@ -312,7 +312,7 @@ sequenceDiagram
 
 `waitFor(id)` polls Santos from the server process where the SDK is running. It does not run in the browser unless someone incorrectly imports the SDK into frontend code.
 
-Use `bulkGenerate()` when a catalog shoot can be created as rows in one backend mutation. Use `waitForBatch(ids)` when a workflow fans out multiple generations and already has the task IDs.
+Use `bulkGenerateAndWait()` when a catalog shoot should be created and awaited in one SDK call. Use `bulkGenerate()` when you want to create the shoot, store the returned IDs, and let a background worker poll later. Use `waitForBatch(ids)` only for workflows that already have generation IDs.
 
 Defaults:
 
@@ -342,9 +342,8 @@ Batch wait flow:
 
 ```mermaid
 flowchart TD
-  Start["waitForBatch([ids])"] --> Fetch["Fetch one generation history page"]
-  Fetch --> Filter["Filter returned rows by ids"]
-  Filter --> Ready["Fire onReady for newly READY rows"]
+  Start["waitForBatch([ids])"] --> Fetch["Fetch each pending id with imageGeneration(id)"]
+  Fetch --> Ready["Fire onReady for newly READY rows"]
   Ready --> Progress["Fire onProgress for still-running rows"]
   Progress --> Terminal{"Any terminal status?"}
   Terminal -->|"Yes"| Fail["Fire onFail and throw"]
@@ -360,7 +359,7 @@ Production recommendation:
 
 - For small internal tools, it is acceptable to call `await onai.images.waitFor(id)` inside a backend route if the host allows long requests.
 - For production web apps, return the generation ID immediately, store a job record, and poll from a backend worker or queue.
-- For catalog shoots or other fan-out workflows, prefer `bulkGenerate()` to create all rows in one Santos mutation. Use `waitForBatch()` with the returned IDs if the backend worker needs to block until every row is ready.
+- For catalog shoots or other fan-out workflows, prefer `bulkGenerateAndWait()` when the backend worker should block until every generated row is ready. Use `bulkGenerate()` when you want to return/store pending IDs immediately.
 - Let the browser poll your own lightweight status route, subscribe through SSE/WebSocket, or refresh from your database. Do not make the browser poll Santos directly.
 - Use a 3-5 second backend polling interval for normal images. Use a longer interval for beta video when the expected duration is higher.
 - Keep timeouts lower than your serverless function timeout. If your platform times out after 60 seconds, use a background worker instead of holding the HTTP request open.
@@ -391,7 +390,7 @@ This pattern minimizes device load and API load. The device makes cheap requests
 | `onai.products` | Creates, lists, and searches product models. Products use `modelType: "OBJECT"`. | Pass direct image bytes to `products.create()` for simple flows, or pass an uploaded image reference if you already uploaded. | At least one image is required; duplicate model names may still create new models; model warnings may be returned for low-resolution or unclear product images. |
 | `onai.characters` | Creates, lists, and searches character models. Characters use `modelType: "CHARACTER"`. | Use one clear portrait/body reference when possible. Keep the returned model ID for prompt mentions. | Low-resolution faces may produce warnings; missing `imageOptions` can block generation config; character and product IDs must not be mixed in prompt config. |
 | `onai.models` | Lists all product and character models together. | Use for admin/debug screens. Use typed `products.search()` or `characters.search()` for app workflows. | Santos does not accept server-side `search` for custom models right now, so search is SDK-side after listing. Cache repeated reads if your app calls it often. |
-| `onai.images` | Generates images, bulk-generates catalog rows, reads history, polls status, checks cooldown, builds mentions and model configs. | Use `bulkGenerate()` for catalog shoots, `generate()` for one task, `waitFor()` for one generation, and `waitForBatch()` for known IDs. | Cooldown may block usage; `originalImageUrl` is `null` until READY; old history pages may not include every generation; rate limits can apply. `ids` and `bulkGenerationId` list filters are SDK-side helpers. |
+| `onai.images` | Generates images, bulk-generates catalog rows, reads history, polls status, checks cooldown, builds mentions and model configs. | Use `bulkGenerateAndWait()` for blocking catalog shoots, `bulkGenerate()` for fire-and-store shoots, `generate()` for one task, and `waitFor()` for one generation. | Cooldown may block usage; `originalImageUrl` is `null` until READY; rate limits can apply. `list({ ids, bulkGenerationId })` filters history SDK-side for dashboard-style reads. |
 | `onai.generations` | Stable alias of `onai.images`. | Use only when the word "generation" is clearer in app code. | Same behavior and edge cases as `onai.images`. |
 | `onai.beta.videos` | Beta video generation using the same generation task shape with `assetType: "VIDEO"`. | Keep behind feature flags and use worker polling. | Beta API may change; video waits may exceed normal HTTP timeouts; output may take longer than images. |
 | `onai.raw` | Sends a custom Santos GraphQL operation. | Use only for backend-only workflows not wrapped by the SDK yet. | You own the query shape, variables, pagination, and schema drift risk. Never expose raw GraphQL from public frontend routes. |
@@ -407,7 +406,8 @@ Use these defaults unless your production telemetry says otherwise.
 | Generate and wait in a route | Only for internal tools or hosts with enough timeout. | Simple, but the HTTP connection stays open while backend polling happens. |
 | Production wait | Queue or worker polls with `intervalMs` around `3000-5000`. | Keeps browser/device work low and avoids serverless timeout problems. |
 | Batch production create | Use `bulkGenerate()` for catalog rows, then store the returned `bulkGenerationId` and generation IDs. | Creation is one backend mutation instead of N separate generate calls. |
-| Batch production wait | Use `waitForBatch(ids)` with one worker per shoot/job. | Avoids N independent poll loops for N generated angles. |
+| Blocking catalog shoot | Use `bulkGenerateAndWait()` with a concurrency limit. | The SDK creates all rows, extracts returned generation IDs internally, and polls direct `imageGeneration(id)` status calls. |
+| Existing ID batch wait | Use `waitForBatch(ids)` with one worker per shoot/job. | Uses direct status calls for each ID with controlled concurrency. |
 | Status updates to browser | Browser polls your backend every `3000-5000ms`, or use SSE/WebSocket. | The browser never touches Santos credentials or rate limits directly. |
 | Lists/search screens | Cache model lists briefly per workspace. | Typed search is local after list; caching avoids repeated full-list calls. |
 | Generation history | Use `listPage()` for infinite scroll. | Cursor pagination avoids pulling too much history. |
@@ -416,7 +416,7 @@ Avoid:
 
 - Calling `waitFor()` from browser code.
 - Running many `waitFor()` calls concurrently in one request.
-- Starting one worker per generation when one `waitForBatch()` worker can watch the whole fan-out.
+- Starting one worker per generation when one `bulkGenerateAndWait()` or `waitForBatch()` call can watch the whole fan-out.
 - Polling more often than every 2-3 seconds without a measured reason.
 - Calling `models.list()` on every keypress. Debounce search and cache workspace model lists.
 - Returning raw SDK error details to end users. Log debug details server-side and return friendly product errors.
@@ -759,7 +759,7 @@ console.log(completed.originalImageUrl);
 console.log(completed.originalImageUrls);
 ```
 
-`generate()` returns the generation task. `waitFor(id)` polls Santos `imageGenerations` until the generation is `READY`, then returns the completed generation. `originalImageUrl` is the first completed output's original URL. It is `null` until Santos returns generated output. `originalImageUrls` contains every generated output URL, so use it when `samples` is `Images2` or `Images4`.
+`generate()` returns the generation task. `waitFor(id)` polls Santos `imageGeneration(id)` until the generation is `READY`, then returns the completed generation. `originalImageUrl` is the first completed output's original URL. It is `null` until Santos returns generated output. `originalImageUrls` contains every generated output URL, so use it when `samples` is `Images2` or `Images4`.
 
 You can also inspect generation history directly:
 
@@ -779,14 +779,13 @@ Prompt mentions and model configs must stay aligned. If the prompt references a 
 
 ### Batch Wait For Multiple Generations
 
-Use `waitForBatch()` when a workflow creates many generation tasks and you already have the task IDs. For new catalog-shoot code, prefer `bulkGenerate()` below to create the whole shoot in one request, then pass the returned IDs to `waitForBatch()` if you need a blocking wait.
+Use `waitForBatch()` when a workflow already has generation IDs. For new catalog-shoot code, prefer `bulkGenerateAndWait()` below so the SDK creates the shoot and polls the returned IDs internally.
 
 ```ts
 const completed = await onai.images.waitForBatch(generationIds, {
   intervalMs: 3_000,
   timeoutMs: 180_000,
-  limit: Math.max(generationIds.length, 50),
-  maxPages: 1,
+  concurrency: 5,
   onProgress: async (id, generation) => {
     await db.generations.update(id, { status: generation.status });
   },
@@ -809,11 +808,10 @@ for (const [id, generation] of completed) {
 Batch wait behavior:
 
 - One poll loop watches all ids.
-- Each poll fetches one or more generation-history pages, depending on `limit` and `maxPages`.
-- Default `limit` is `Math.max(ids.length, 20)`.
-- Default `maxPages` is `1` so one batch wait uses one GraphQL hit per interval by default.
-- Increase `limit` when the target generations may not be in the first recent-history page.
-- Increase `maxPages` only when you need to search deeper history and accept extra GraphQL calls per interval.
+- Each poll fetches pending IDs with direct Santos `imageGeneration(id)` status requests.
+- Default `concurrency` is `Math.min(ids.length, 5)`.
+- Increase `concurrency` when your backend can tolerate more simultaneous status requests.
+- Decrease `concurrency` when you want stricter API-load limits.
 - `onReady` fires once per id when it first reaches `READY`.
 - `onProgress` fires for found, non-terminal, non-ready generations.
 - `onFail` fires before the SDK throws when any watched generation reaches a terminal status.
@@ -823,39 +821,31 @@ Batch wait behavior:
 
 ### Bulk Generate Catalog Shoots
 
-Use `bulkGenerate()` as the preferred production path when your app creates a whole shoot or job at once.
+Use `bulkGenerateAndWait()` as the preferred blocking production path when your app creates a whole shoot or job at once.
 
 ```ts
 const bulkGenerationId = crypto.randomUUID();
 
-const shoot = await onai.images.bulkGenerate({
-  prompt: "commercial catalog photo",
-  aspectRatio: ImageGenerationAspectRatio.Portrait4x5,
-  bulkGenerationId,
-  rows: [
-    {
-      productModelIds: ["product-top"],
-      characterModelIds: ["character-model"],
-    },
-    {
-      productModelIds: ["product-shoes"],
-      characterModelIds: ["character-model"],
-    },
-  ],
-});
-
-await db.shoots.insert({
-  id: shoot.bulkGenerationId,
-  status: "PENDING",
-  expectedCount: shoot.imageGenerations.length,
-  generationIds: shoot.imageGenerations.map((generation) => generation.id),
-});
-
-const completed = await onai.images.waitForBatch(
-  shoot.imageGenerations.map((generation) => generation.id),
+const shoot = await onai.images.bulkGenerateAndWait(
+  {
+    prompt: "commercial catalog photo",
+    aspectRatio: ImageGenerationAspectRatio.Portrait4x5,
+    bulkGenerationId,
+    rows: [
+      {
+        productModelIds: ["product-top"],
+        characterModelIds: ["character-model"],
+      },
+      {
+        productModelIds: ["product-shoes"],
+        characterModelIds: ["character-model"],
+      },
+    ],
+  },
   {
     intervalMs: 3_000,
     timeoutMs: 180_000,
+    concurrency: 5,
     onReady: async (id, generation) => {
       await db.generations.update(id, {
         status: generation.status,
@@ -867,16 +857,23 @@ const completed = await onai.images.waitForBatch(
     },
   },
 );
+
+await db.shoots.insert({
+  id: shoot.bulkGenerationId,
+  status: "READY",
+  generationIds: shoot.imageGenerations.map((generation) => generation.id),
+  originalImageUrls: shoot.imageGenerations.flatMap((generation) => generation.originalImageUrls ?? []),
+});
 ```
 
 Bulk generate behavior:
 
 - `bulkGenerate()` calls Santos `imageGenerationBulkCreate`.
+- `bulkGenerateAndWait()` calls `bulkGenerate()`, extracts the returned `imageGenerations[].id`, and polls each ID through direct `imageGeneration(id)` status requests.
 - The SDK generates a `bulkGenerationId` automatically when you do not pass one.
 - Each row can include `productModelIds`, `characterModelIds`, or both.
 - The response includes `bulkGenerationId` and `imageGenerations`.
-- Store the returned generation IDs in your app database before waiting.
-- Use `waitForBatch(ids)` only when a backend worker needs to wait for completion.
+- Use `bulkGenerate()` without waiting when you want to store pending generation IDs and let a separate worker call `waitForBatch(ids)` later.
 
 Beta video does not expose bulk creation yet.
 
@@ -1089,7 +1086,7 @@ Use this prompt when asking an AI coding assistant to integrate or update the SD
 ```text
 You are integrating the OnAI server-side TypeScript SDK. Keep the SDK server-only. Load refreshToken, firebaseApiKey, and workspaceId from server-side configuration or the app database for each connected account. Do not expose credentials to browser code.
 
-Use onai.auth for persisted auth token state, onai.uploads for source-image uploads, onai.products for product models, onai.characters for character models, onai.models only for listing all models, onai.images for stable image generation, and onai.beta.videos only for beta video generation. Load authTokenState from the database when creating the SDK client and save onAuthTokenChange back to the database so the SDK does not refresh auth on every request. Product and character creation can accept either an uploaded image reference or a direct upload payload with fileName, contentType, and body. For backend observability, pass logger: true or a Fastify/Pino-style logger and choose logLevel. After creating a single generation, call waitFor(id) to fetch the READY generation and read originalImageUrl/originalImageUrls. For catalog fan-out jobs, call bulkGenerate() to create all rows in one Santos mutation, store the returned generation IDs, then call waitForBatch(ids) from one backend worker only when you need a blocking wait. Keep video behind beta controls. Use exported enums instead of raw strings where possible.
+Use onai.auth for persisted auth token state, onai.uploads for source-image uploads, onai.products for product models, onai.characters for character models, onai.models only for listing all models, onai.images for stable image generation, and onai.beta.videos only for beta video generation. Load authTokenState from the database when creating the SDK client and save onAuthTokenChange back to the database so the SDK does not refresh auth on every request. Product and character creation can accept either an uploaded image reference or a direct upload payload with fileName, contentType, and body. For backend observability, pass logger: true or a Fastify/Pino-style logger and choose logLevel. After creating a single generation, call waitFor(id) to fetch the READY generation and read originalImageUrl/originalImageUrls. For blocking catalog fan-out jobs, call bulkGenerateAndWait() so the SDK creates rows in one Santos mutation, extracts returned generation IDs, and polls direct imageGeneration(id) status calls with controlled concurrency. For fire-and-store jobs, call bulkGenerate(), store returned generation IDs, and let one backend worker call waitForBatch(ids). Keep video behind beta controls. Use exported enums instead of raw strings where possible.
 
 Preserve Santos branding in public docs and user-facing errors. Do not expose raw upstream errors. After changes, run npm run build and scan for stale stable video references, non-Santos branding, and .ts import endings.
 ```

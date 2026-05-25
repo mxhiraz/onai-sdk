@@ -139,13 +139,12 @@ test("images.bulkGenerate creates multiple generation rows in one request", asyn
   );
 });
 
-test("waitForBatch polls all ids with one history request per interval", async () => {
-  let historyCalls = 0;
-  const snapshots = [
-    [generation("gen-a", "PENDING"), generation("gen-b", "PENDING")],
-    [generation("gen-a", "READY"), generation("gen-b", "PENDING")],
-    [generation("gen-a", "READY"), generation("gen-b", "READY")],
-  ];
+test("waitForBatch polls each id through direct status requests", async () => {
+  const callsById = new Map();
+  const snapshots = {
+    "gen-a": [generation("gen-a", "PENDING"), generation("gen-a", "READY")],
+    "gen-b": [generation("gen-b", "PENDING"), generation("gen-b", "PENDING"), generation("gen-b", "READY")],
+  };
   const progress = [];
   const ready = [];
   const onai = createOnaiClient({
@@ -158,14 +157,17 @@ test("waitForBatch polls all ids with one history request per interval", async (
     },
     fetch: async (_url, init) => {
       const request = JSON.parse(String(init.body));
-      assert.equal(request.operationName, "imageGenerations");
-      assert.equal(request.variables.first, 20);
-      const snapshot = snapshots[Math.min(historyCalls, snapshots.length - 1)];
-      historyCalls += 1;
+      assert.equal(request.operationName, "imageGeneration");
+      const id = request.variables.id;
+      const calls = callsById.get(id) ?? 0;
+      callsById.set(id, calls + 1);
+      const idSnapshots = snapshots[id];
+      assert.ok(idSnapshots, `unexpected generation id ${id}`);
+      const snapshot = idSnapshots[Math.min(calls, idSnapshots.length - 1)];
 
       return jsonResponse({
         data: {
-          imageGenerations: generationPage(snapshot),
+          imageGeneration: snapshot,
         },
       });
     },
@@ -174,13 +176,13 @@ test("waitForBatch polls all ids with one history request per interval", async (
   const result = await onai.images.waitForBatch(["gen-a", "gen-b"], {
     intervalMs: 1,
     timeoutMs: 1_000,
-    limit: 20,
-    maxPages: 1,
+    concurrency: 2,
     onProgress: (id, item) => progress.push(`${id}:${item.status}`),
     onReady: (id) => ready.push(id),
   });
 
-  assert.equal(historyCalls, 3);
+  assert.equal(callsById.get("gen-a"), 2);
+  assert.equal(callsById.get("gen-b"), 3);
   assert.equal(result.size, 2);
   assert.equal(result.get("gen-a")?.status, "READY");
   assert.equal(result.get("gen-b")?.status, "READY");
@@ -191,6 +193,7 @@ test("waitForBatch polls all ids with one history request per interval", async (
 
 test("waitForBatch reports terminal failures without polling each id separately", async () => {
   const failed = [];
+  let statusCalls = 0;
   const onai = createOnaiClient({
     firebaseApiKey: "firebase-api-key",
     workspaceId: "workspace-id",
@@ -201,14 +204,13 @@ test("waitForBatch reports terminal failures without polling each id separately"
     },
     fetch: async (_url, init) => {
       const request = JSON.parse(String(init.body));
-      assert.equal(request.operationName, "imageGenerations");
+      assert.equal(request.operationName, "imageGeneration");
+      statusCalls += 1;
+      const id = request.variables.id;
 
       return jsonResponse({
         data: {
-          imageGenerations: generationPage([
-            generation("gen-a", "READY"),
-            generation("gen-b", "FAILED", "bad prompt"),
-          ]),
+          imageGeneration: id === "gen-b" ? generation("gen-b", "FAILED", "bad prompt") : generation("gen-a", "READY"),
         },
       });
     },
@@ -219,13 +221,92 @@ test("waitForBatch reports terminal failures without polling each id separately"
       onai.images.waitForBatch(["gen-a", "gen-b"], {
         intervalMs: 1,
         timeoutMs: 100,
-        maxPages: 1,
+        concurrency: 2,
         onFail: (id, reason) => failed.push(`${id}:${reason}`),
       }),
     /One or more generations did not complete/,
   );
 
+  assert.equal(statusCalls, 2);
   assert.deepEqual(failed, ["gen-b:bad prompt"]);
+});
+
+test("bulkGenerateAndWait hides generation ids while polling direct status", async () => {
+  const operations = [];
+  const statusCallsById = new Map();
+  const onai = createOnaiClient({
+    firebaseApiKey: "firebase-api-key",
+    workspaceId: "workspace-id",
+    authTokenState: {
+      accessToken: "access-token",
+      accessTokenExpiresAt: Date.now() + 3_600_000,
+      refreshToken: "refresh-token",
+    },
+    fetch: async (_url, init) => {
+      const request = JSON.parse(String(init.body));
+      operations.push(request.operationName);
+
+      if (request.operationName === "imageGenerationBulkCreate") {
+        return jsonResponse({
+          data: {
+            imageGenerationBulkCreate: {
+              bulkGenerationId: "shoot-1",
+              imageGenerations: [
+                generation("bulk-a", "PENDING", null, "shoot-1"),
+                generation("bulk-b", "PENDING", null, "shoot-1"),
+              ],
+              __typename: "ImageGenerationBulkCreatePayload",
+            },
+          },
+        });
+      }
+
+      assert.equal(request.operationName, "imageGeneration");
+      const id = request.variables.id;
+      const calls = statusCallsById.get(id) ?? 0;
+      statusCallsById.set(id, calls + 1);
+
+      return jsonResponse({
+        data: {
+          imageGeneration: generation(id, calls === 0 ? "PENDING" : "READY", null, "shoot-1"),
+        },
+      });
+    },
+  });
+
+  const result = await onai.images.bulkGenerateAndWait(
+    {
+      prompt: "catalog shot",
+      bulkGenerationId: "shoot-1",
+      rows: [
+        {
+          productModelIds: ["product-a"],
+          characterModelIds: ["character-a"],
+        },
+        {
+          productModelIds: ["product-b"],
+          characterModelIds: ["character-a"],
+        },
+      ],
+    },
+    {
+      intervalMs: 1,
+      timeoutMs: 1_000,
+      concurrency: 2,
+    },
+  );
+
+  assert.deepEqual(operations, [
+    "imageGenerationBulkCreate",
+    "imageGeneration",
+    "imageGeneration",
+    "imageGeneration",
+    "imageGeneration",
+  ]);
+  assert.deepEqual(
+    result.imageGenerations.map((item) => `${item.id}:${item.status}`),
+    ["bulk-a:READY", "bulk-b:READY"],
+  );
 });
 
 function generation(id, status, statusMessage = null, bulkGenerationId = null) {

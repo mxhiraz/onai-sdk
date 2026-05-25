@@ -177,9 +177,7 @@ export interface WaitForImageGenerationInput extends GetImageGenerationInput {
 }
 
 export interface WaitForBatchImageGenerationsInput extends WaitForImageGenerationInput {
-  limit?: number;
-  pageSize?: number;
-  maxPages?: number;
+  concurrency?: number;
   onProgress?: (id: string, generation: ImageGeneration) => void | Promise<void>;
   onReady?: (id: string, generation: ImageGeneration) => void | Promise<void>;
   onFail?: (id: string, reason: string, generation: ImageGeneration) => void | Promise<void>;
@@ -393,8 +391,22 @@ export class ImagesResource {
     });
   }
 
-  bulkCreate(input: GenerateBulkImagesInput): Promise<BulkImageGenerationResult> {
-    return this.bulkGenerate(input);
+  async bulkGenerateAndWait(
+    input: GenerateBulkImagesInput,
+    waitInput: WaitForBatchImageGenerationsInput = {},
+  ): Promise<BulkImageGenerationResult> {
+    const result = await this.bulkGenerate(input);
+    const completedGenerations = await this.waitForBatch(
+      result.imageGenerations.map((generation) => generation.id),
+      waitInput,
+    );
+
+    return {
+      ...result,
+      imageGenerations: result.imageGenerations.map(
+        (generation) => completedGenerations.get(generation.id) ?? generation,
+      ),
+    };
   }
 
   async list(input: ListImageGenerationsInput = {}): Promise<ImageGeneration[]> {
@@ -967,14 +979,11 @@ async function waitForGeneration(
 
 async function waitForGenerationBatch(request: GenerationBatchLookupRequest): Promise<Map<string, ImageGeneration>> {
   const ids = normalizeGenerationIds(request.ids, "ids");
-  const idSet = new Set(ids);
   const targetStatus = request.input.targetStatus ?? "READY";
   const terminalStatuses = new Set(request.input.terminalStatuses ?? ["FAILED", "ERROR", "CANCELED", "CANCELLED"]);
   const timeoutMs = normalizePositiveNumber(request.input.timeoutMs ?? 180_000, "timeoutMs");
   const intervalMs = normalizePositiveNumber(request.input.intervalMs ?? 3_000, "intervalMs");
-  const pageLimit = normalizePositiveInteger(request.input.limit ?? Math.max(ids.length, 20), "limit");
-  const pageSize = normalizePositiveInteger(request.input.pageSize ?? pageLimit, "pageSize");
-  const maxPages = normalizePositiveInteger(request.input.maxPages ?? 1, "maxPages");
+  const concurrency = normalizePositiveInteger(request.input.concurrency ?? Math.min(ids.length, 5), "concurrency");
   const readyGenerations = new Map<string, ImageGeneration>();
   const failedGenerations = new Map<string, { generation: ImageGeneration; reason: string }>();
   const startedAt = Date.now();
@@ -986,36 +995,27 @@ async function waitForGenerationBatch(request: GenerationBatchLookupRequest): Pr
       targetStatus,
       timeoutMs,
       intervalMs,
-      pageLimit,
-      pageSize,
-      maxPages,
+      concurrency,
       assetType: request.forcedAssetType,
     },
     "Santos generation batch wait started.",
   );
 
   while (Date.now() - startedAt <= timeoutMs) {
-    const listInput: ListImageGenerationsInput = {
-      ids,
-      limit: pageLimit,
-      pageSize,
-      maxPages,
-    };
-
-    if (request.input.workspaceId) {
-      listInput.workspaceId = request.input.workspaceId;
-    }
-
-    const generations = await listAllGenerations({
-      graphql: request.graphql,
-      logger: request.logger,
-      defaultWorkspaceId: request.defaultWorkspaceId,
-      input: listInput,
-      forcedAssetType: request.forcedAssetType,
-    });
+    const pendingIds = ids.filter((id) => !readyGenerations.has(id) && !failedGenerations.has(id));
+    const generations = await mapWithConcurrency(pendingIds, concurrency, async (id) =>
+      getGeneration({
+        graphql: request.graphql,
+        logger: request.logger,
+        defaultWorkspaceId: request.defaultWorkspaceId,
+        id,
+        input: request.input,
+        forcedAssetType: request.forcedAssetType,
+      }),
+    );
 
     for (const generation of generations) {
-      if (!idSet.has(generation.id) || readyGenerations.has(generation.id) || failedGenerations.has(generation.id)) {
+      if (!generation || readyGenerations.has(generation.id) || failedGenerations.has(generation.id)) {
         continue;
       }
 
@@ -1110,6 +1110,37 @@ async function waitForGenerationBatch(request: GenerationBatchLookupRequest): Pr
       timeoutMs,
     },
   });
+}
+
+async function mapWithConcurrency<TInput, TOutput>(
+  values: TInput[],
+  concurrency: number,
+  worker: (value: TInput) => Promise<TOutput>,
+): Promise<TOutput[]> {
+  const results: TOutput[] = [];
+  let nextIndex = 0;
+
+  async function runWorker(): Promise<void> {
+    while (nextIndex < values.length) {
+      const index = nextIndex;
+      nextIndex += 1;
+      const value = values[index];
+
+      if (value === undefined) {
+        continue;
+      }
+
+      results[index] = await worker(value);
+    }
+  }
+
+  await Promise.all(
+    Array.from({ length: Math.min(concurrency, values.length) }, async () => {
+      await runWorker();
+    }),
+  );
+
+  return results;
 }
 
 function filterGenerationsPage(
