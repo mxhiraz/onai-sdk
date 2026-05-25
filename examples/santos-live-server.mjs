@@ -71,7 +71,7 @@ async function handleApiRequest(path, onai, body) {
       });
 
     case "/api/models":
-      return onai.models.list(compactInput({ search: body.search, type: body.type }));
+      return onai.models.list(compactInput({ type: body.type }));
 
     case "/api/products":
       return onai.products.search(body.search ?? "");

@@ -252,7 +252,6 @@
               <input id="search" value="tom" />
             </label>
             <div class="row">
-              <button data-action="searchModels">Search Models</button>
               <button data-action="searchCharacters">Search Characters</button>
               <button data-action="searchProducts">Search Products</button>
             </div>
@@ -428,7 +427,6 @@
         models: async () => renderAndWrite("All Models", await api("/api/models")),
         images: async () => writeOutput("Recent Images", await api("/api/images", { limit: 12 })),
         videos: async () => writeOutput("Recent Videos", await api("/api/videos", { limit: 12 })),
-        searchModels: async () => renderAndWrite("Model Search", await api("/api/models", { search: $("search").value })),
         searchCharacters: async () =>
           renderAndWrite("Character Search", await api("/api/characters", { search: $("search").value })),
         searchProducts: async () =>

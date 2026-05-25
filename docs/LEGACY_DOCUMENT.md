@@ -31,7 +31,7 @@ The SDK must never run in browser code because it handles refresh tokens. Every 
 The current release path is GitHub. Install a pinned release tag in backend projects:
 
 ```bash
-npm install github:mxhiraz/onai-sdk#v0.1.3
+npm install github:mxhiraz/onai-sdk#v0.1.4
 ```
 
 In `package.json`:
@@ -39,7 +39,7 @@ In `package.json`:
 ```json
 {
   "dependencies": {
-    "onai-sdk": "github:mxhiraz/onai-sdk#v0.1.3"
+    "onai-sdk": "github:mxhiraz/onai-sdk#v0.1.4"
   }
 }
 ```
@@ -47,7 +47,7 @@ In `package.json`:
 You can also install from the HTTPS Git URL:
 
 ```bash
-npm install git+https://github.com/mxhiraz/onai-sdk.git#v0.1.3
+npm install git+https://github.com/mxhiraz/onai-sdk.git#v0.1.4
 ```
 
 The package includes a `prepare` script, so GitHub installs build `dist` automatically before the SDK is packed for the consuming project.
@@ -101,7 +101,7 @@ The sample page can test:
 
 - `onai.images.cooldownStatus()`
 - `onai.raw.graphqlRequest()`
-- `onai.models.list()` and model search
+- `onai.models.list()` for inspecting all models
 - `onai.products.search()` and `onai.products.create()`
 - `onai.characters.search()` and `onai.characters.create()`
 - `onai.uploads.fromSignedUrl()` and `onai.uploads.uploadToSignedUrl()`
@@ -160,15 +160,15 @@ git push
 Optional version tag:
 
 ```bash
-git tag v0.1.3
-git push origin v0.1.3
+git tag v0.1.4
+git push origin v0.1.4
 ```
 
 Downstream apps can install a branch, tag, or commit:
 
 ```bash
 npm install github:mxhiraz/onai-sdk#main
-npm install github:mxhiraz/onai-sdk#v0.1.3
+npm install github:mxhiraz/onai-sdk#v0.1.4
 npm install git+https://github.com/mxhiraz/onai-sdk.git#<commit-sha>
 ```
 
@@ -235,7 +235,7 @@ The stable modules are:
 | `onai.uploads` | Stable | Upload bytes to signed URLs and parse uploaded image references. |
 | `onai.products` | Stable | Create, list, and search product models. |
 | `onai.characters` | Stable | Create, list, and search character models. |
-| `onai.models` | Stable | List and search products and characters together. |
+| `onai.models` | Stable | List products and characters together for inspection. |
 | `onai.images` | Stable | Generate images, fetch generation history/status, wait for completion, and build prompt/model helper values. |
 | `onai.generations` | Stable alias | Alias of `onai.images`. |
 | `onai.raw` | Stable escape hatch | Call unsupported Santos GraphQL operations directly. |
@@ -378,7 +378,7 @@ console.log(character.status);
 
 Characters map to Santos custom models with `modelType: "CHARACTER"`.
 
-### List and Search Models
+### List Models And Search Typed Models
 
 ```ts
 const allModels = await onai.models.list();
@@ -386,7 +386,7 @@ const products = await onai.products.search("shirt");
 const characters = await onai.characters.search("tom");
 ```
 
-The Santos custom-model list operation currently rejects a `search` input. The SDK therefore lists workspace models first and narrows the returned set by model text for `models.search()`, `products.search()`, and `characters.search()`. Product and character shortcuts also apply their model-type narrowing.
+Use `onai.models.list()` only when you need to inspect everything in the workspace. Search belongs to the typed workflows: use `onai.products.search()` for product models and `onai.characters.search()` for character models. The Santos custom-model list operation currently rejects a `search` input, so typed search lists workspace models first and narrows the returned set by model text.
 
 ### Generate Image
 
@@ -632,7 +632,7 @@ Use this prompt when asking an AI coding assistant to integrate or update the SD
 ```text
 You are integrating the OnAI server-side TypeScript SDK. Keep the SDK server-only. Load refreshToken, firebaseApiKey, and workspaceId from server-side configuration or the app database for each connected account. Do not expose credentials to browser code.
 
-Use onai.uploads for signed URL uploads, onai.products for product models, onai.characters for character models, onai.models for list/search, onai.images for stable image generation, and onai.beta.videos only for beta video generation. After creating a generation, call waitFor(id) to fetch the READY generation and read originalImageUrl/originalImageUrls. Keep video behind beta controls. Use exported enums instead of raw strings where possible.
+Use onai.uploads for signed URL uploads, onai.products for product models, onai.characters for character models, onai.models only for listing all models, onai.images for stable image generation, and onai.beta.videos only for beta video generation. After creating a generation, call waitFor(id) to fetch the READY generation and read originalImageUrl/originalImageUrls. Keep video behind beta controls. Use exported enums instead of raw strings where possible.
 
 Preserve Santos branding in public docs and user-facing errors. Do not expose raw upstream errors. After changes, run npm run build and scan for stale stable video references, non-Santos branding, and .ts import endings.
 ```
