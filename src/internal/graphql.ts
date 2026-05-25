@@ -25,9 +25,15 @@ interface GraphqlRequest {
   query: string;
 }
 
+interface GraphqlError {
+  message?: string;
+  extensions?: Record<string, unknown>;
+  path?: Array<string | number>;
+}
+
 interface GraphqlResponse<TData> {
   data?: TData;
-  errors?: Array<{ message?: string; extensions?: Record<string, unknown> }>;
+  errors?: GraphqlError[];
 }
 
 export class SantosGraphqlClient {
@@ -64,33 +70,47 @@ export class SantosGraphqlClient {
       body: JSON.stringify(request),
     });
 
-    const payload = await readJson<GraphqlResponse<TData>>(response);
+    const rawBody = await response.text();
+    const payload = parseJson<GraphqlResponse<TData>>(rawBody);
 
     if (!response.ok) {
       throw new OnaiApiError("Santos request failed.", {
         status: response.status,
-        details: {
+        details: buildGraphqlErrorDetails({
           operationName: request.operationName,
-        },
+          response,
+          rawBody,
+          variables: request.variables,
+          errors: payload.errors,
+          reason: "http_error",
+        }),
       });
     }
 
     if (payload.errors?.length) {
       throw new OnaiApiError("Santos returned an error.", {
         status: response.status,
-        details: {
+        details: buildGraphqlErrorDetails({
           operationName: request.operationName,
-          errorCount: payload.errors.length,
-        },
+          response,
+          rawBody,
+          variables: request.variables,
+          errors: payload.errors,
+          reason: "graphql_error",
+        }),
       });
     }
 
     if (!payload.data) {
       throw new OnaiApiError("Santos response did not include data.", {
         status: response.status,
-        details: {
+        details: buildGraphqlErrorDetails({
           operationName: request.operationName,
-        },
+          response,
+          rawBody,
+          variables: request.variables,
+          reason: "missing_data",
+        }),
       });
     }
 
@@ -98,10 +118,93 @@ export class SantosGraphqlClient {
   }
 }
 
-async function readJson<T>(response: Response): Promise<T> {
+function parseJson<T>(rawBody: string): T {
   try {
-    return (await response.json()) as T;
+    return JSON.parse(rawBody) as T;
   } catch {
     return {} as T;
   }
+}
+
+function buildGraphqlErrorDetails(input: {
+  operationName: string;
+  response: Response;
+  rawBody: string;
+  variables: Record<string, unknown> | undefined;
+  errors?: GraphqlError[] | undefined;
+  reason: string;
+}): Record<string, unknown> {
+  return {
+    reason: input.reason,
+    operationName: input.operationName,
+    status: input.response.status,
+    statusText: input.response.statusText,
+    responseHeaders: pickDebugResponseHeaders(input.response.headers),
+    graphqlErrors: input.errors?.map(normalizeGraphqlError),
+    variables: sanitizeForDebug(input.variables ?? {}),
+    responseBodyPreview: previewBody(input.rawBody),
+  };
+}
+
+function pickDebugResponseHeaders(headers: Headers): Record<string, string> {
+  const names = [
+    "content-type",
+    "x-request-id",
+    "x-ratelimit-limit",
+    "x-ratelimit-remaining",
+    "x-ratelimit-reset",
+  ];
+
+  return Object.fromEntries(
+    names
+      .map((name) => [name, headers.get(name)] as const)
+      .filter((entry): entry is readonly [string, string] => typeof entry[1] === "string" && entry[1].length > 0),
+  );
+}
+
+function normalizeGraphqlError(error: GraphqlError): Record<string, unknown> {
+  return {
+    message: error.message,
+    path: error.path,
+    code: typeof error.extensions?.code === "string" ? error.extensions.code : undefined,
+  };
+}
+
+function previewBody(rawBody: string): string | undefined {
+  const normalized = rawBody.trim();
+
+  if (!normalized) {
+    return undefined;
+  }
+
+  return normalized.length > 2_000 ? `${normalized.slice(0, 2_000)}...` : normalized;
+}
+
+function sanitizeForDebug(value: unknown): unknown {
+  if (Array.isArray(value)) {
+    return value.map(sanitizeForDebug);
+  }
+
+  if (!value || typeof value !== "object") {
+    return value;
+  }
+
+  return Object.fromEntries(
+    Object.entries(value).map(([key, entryValue]) => {
+      const normalizedKey = key.toLowerCase();
+
+      if (
+        normalizedKey.includes("token") ||
+        normalizedKey.includes("authorization") ||
+        normalizedKey.includes("apikey") ||
+        normalizedKey.includes("api_key") ||
+        normalizedKey.includes("signedurl") ||
+        normalizedKey.includes("password")
+      ) {
+        return [key, "[redacted]"];
+      }
+
+      return [key, sanitizeForDebug(entryValue)];
+    }),
+  );
 }

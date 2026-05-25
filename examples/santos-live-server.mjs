@@ -37,9 +37,11 @@ const server = createServer(async (request, response) => {
 
     sendJson(response, 200, { data });
   } catch (error) {
+    const debugError = serializeError(error);
+    console.error("[onai-sdk sample] request failed", JSON.stringify(debugError, null, 2));
     sendJson(response, statusFromError(error), {
       error: error instanceof Error ? error.message : "Request failed.",
-      details: error?.details,
+      ...debugError,
     });
   }
 });
@@ -244,4 +246,20 @@ function sendText(response, status, body, contentType) {
 function statusFromError(error) {
   const status = Number(error?.status);
   return Number.isInteger(status) && status >= 400 && status < 600 ? status : 500;
+}
+
+function serializeError(error) {
+  if (!error || typeof error !== "object") {
+    return {
+      name: "UnknownError",
+      details: error,
+    };
+  }
+
+  return {
+    name: error.name,
+    status: error.status,
+    details: error.details,
+    stack: typeof error.stack === "string" ? error.stack.split("\n").slice(0, 6).join("\n") : undefined,
+  };
 }

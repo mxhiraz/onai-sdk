@@ -31,7 +31,7 @@ The SDK must never run in browser code because it handles refresh tokens. Every 
 The current release path is GitHub. Install a pinned release tag in backend projects:
 
 ```bash
-npm install github:mxhiraz/onai-sdk#v0.1.1
+npm install github:mxhiraz/onai-sdk#v0.1.2
 ```
 
 In `package.json`:
@@ -39,7 +39,7 @@ In `package.json`:
 ```json
 {
   "dependencies": {
-    "onai-sdk": "github:mxhiraz/onai-sdk#v0.1.1"
+    "onai-sdk": "github:mxhiraz/onai-sdk#v0.1.2"
   }
 }
 ```
@@ -47,7 +47,7 @@ In `package.json`:
 You can also install from the HTTPS Git URL:
 
 ```bash
-npm install git+https://github.com/mxhiraz/onai-sdk.git#v0.1.1
+npm install git+https://github.com/mxhiraz/onai-sdk.git#v0.1.2
 ```
 
 The package includes a `prepare` script, so GitHub installs build `dist` automatically before the SDK is packed for the consuming project.
@@ -108,6 +108,8 @@ The sample page can test:
 - `onai.images.list()` and `onai.images.generate()`
 - `onai.beta.videos.list()` and `onai.beta.videos.generate()`
 
+When a request fails, the sample server logs a structured error to the terminal and returns the same debug payload to the page. The payload includes SDK error name, HTTP status, operation name, selected response headers such as `x-request-id` and rate-limit headers, GraphQL error messages, sanitized request variables, and a trimmed response-body preview.
+
 The prompt builder uses Santos mention syntax:
 
 ```text
@@ -158,15 +160,15 @@ git push
 Optional version tag:
 
 ```bash
-git tag v0.1.1
-git push origin v0.1.1
+git tag v0.1.2
+git push origin v0.1.2
 ```
 
 Downstream apps can install a branch, tag, or commit:
 
 ```bash
 npm install github:mxhiraz/onai-sdk#main
-npm install github:mxhiraz/onai-sdk#v0.1.1
+npm install github:mxhiraz/onai-sdk#v0.1.2
 npm install git+https://github.com/mxhiraz/onai-sdk.git#<commit-sha>
 ```
 
@@ -551,7 +553,7 @@ The SDK is server-side only. Preserve these rules:
 
 ## Error Policy
 
-The SDK intentionally trims low-level response payloads from thrown errors. Public errors should be useful but not leak private tokens, provider internals, or raw upstream messages.
+The SDK intentionally trims and sanitizes low-level response payloads from thrown errors. Public errors should be useful but not leak private tokens, bearer tokens, refresh tokens, signed upload URLs, or full raw upstream messages.
 
 Expected error classes:
 
@@ -562,7 +564,7 @@ Expected error classes:
 | `OnaiApiError` | Santos GraphQL or upload request failure. |
 | `OnaiSdkError` | Base class for SDK-specific errors. |
 
-When adding new errors, include a human-readable message, optional HTTP status, and a compact `details.reason` string. Do not attach full raw responses.
+When adding new errors, include a human-readable message, optional HTTP status, and a compact `details.reason` string. GraphQL request failures should include operation name, status, selected response headers, GraphQL messages, sanitized variables, and a short response preview. Do not attach full raw responses or secrets.
 
 ## Beta Policy
 
