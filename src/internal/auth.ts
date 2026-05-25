@@ -7,6 +7,10 @@ interface FirebaseTokenProviderConfig {
   firebaseRefreshTokenEndpoint: string;
   fetch: typeof fetch;
   logger: ResolvedOnaiLogger;
+  accessToken?: string | null | undefined;
+  accessTokenExpiresAt?: number | string | Date | null | undefined;
+  onAuthTokenChange?: OnaiAuthTokenChangeHandler | undefined;
+  authRefreshSkewMs?: number | undefined;
 }
 
 interface FirebaseRefreshResponse {
@@ -19,12 +23,32 @@ interface FirebaseRefreshResponse {
   };
 }
 
+export interface OnaiAuthTokenState {
+  accessToken: string;
+  accessTokenExpiresAt: number;
+  refreshToken: string;
+}
+
+export interface OnaiPersistedAuthTokenState {
+  accessToken?: string | null;
+  accessTokenExpiresAt?: number | string | Date | null;
+  refreshToken: string;
+}
+
+export type OnaiAuthTokenChangeHandler = (state: OnaiAuthTokenState) => void | Promise<void>;
+
+export interface GetOnaiAuthTokenStateInput {
+  forceRefresh?: boolean;
+}
+
 export class FirebaseTokenProvider {
   private refreshToken: string;
   private readonly firebaseApiKey: string;
   private readonly firebaseRefreshTokenEndpoint: string;
   private readonly fetch: typeof fetch;
   private readonly logger: ResolvedOnaiLogger;
+  private readonly onAuthTokenChange: OnaiAuthTokenChangeHandler | undefined;
+  private readonly refreshSkewMs: number;
   private cachedToken: string | null = null;
   private expiresAt = 0;
 
@@ -37,10 +61,27 @@ export class FirebaseTokenProvider {
     );
     this.fetch = config.fetch;
     this.logger = config.logger;
+    this.onAuthTokenChange = config.onAuthTokenChange;
+    this.refreshSkewMs = normalizeRefreshSkewMs(config.authRefreshSkewMs);
+
+    if (config.accessToken) {
+      const expiresAt = normalizeAccessTokenExpiresAt(config.accessTokenExpiresAt);
+
+      if (!expiresAt) {
+        throw new OnaiValidationError("accessTokenExpiresAt is required when accessToken is provided.");
+      }
+
+      this.cachedToken = requireNonEmpty(config.accessToken, "accessToken");
+      this.expiresAt = expiresAt;
+    }
   }
 
   async getToken(): Promise<string> {
-    if (this.cachedToken && Date.now() < this.expiresAt - 60_000) {
+    return (await this.getTokenState()).accessToken;
+  }
+
+  async getTokenState(input: GetOnaiAuthTokenStateInput = {}): Promise<OnaiAuthTokenState> {
+    if (!input.forceRefresh && this.hasUsableCachedToken()) {
       this.logger.trace(
         {
           event: "auth.token_cache.hit",
@@ -48,7 +89,7 @@ export class FirebaseTokenProvider {
         },
         "Santos auth token cache hit.",
       );
-      return this.cachedToken;
+      return this.currentTokenState();
     }
 
     const body = new URLSearchParams({
@@ -118,6 +159,7 @@ export class FirebaseTokenProvider {
     this.cachedToken = token;
     this.refreshToken = payload.refresh_token ?? this.refreshToken;
     this.expiresAt = Date.now() + parseExpiresIn(payload.expires_in);
+    const tokenState = this.currentTokenState();
     this.logger.debug(
       {
         event: "auth.token_refresh.success",
@@ -127,8 +169,55 @@ export class FirebaseTokenProvider {
       },
       "Santos auth token refresh completed.",
     );
+    await this.notifyAuthTokenChange(tokenState);
 
-    return token;
+    return tokenState;
+  }
+
+  getCachedTokenState(): OnaiAuthTokenState | null {
+    if (!this.cachedToken) {
+      return null;
+    }
+
+    return this.currentTokenState();
+  }
+
+  private hasUsableCachedToken(): boolean {
+    return Boolean(this.cachedToken) && Date.now() < this.expiresAt - this.refreshSkewMs;
+  }
+
+  private currentTokenState(): OnaiAuthTokenState {
+    if (!this.cachedToken) {
+      throw new OnaiAuthError("Authentication token is not available.", {
+        details: {
+          reason: "missing_cached_token",
+        },
+      });
+    }
+
+    return {
+      accessToken: this.cachedToken,
+      accessTokenExpiresAt: this.expiresAt,
+      refreshToken: this.refreshToken,
+    };
+  }
+
+  private async notifyAuthTokenChange(state: OnaiAuthTokenState): Promise<void> {
+    if (!this.onAuthTokenChange) {
+      return;
+    }
+
+    try {
+      await this.onAuthTokenChange(state);
+    } catch (error) {
+      this.logger.warn(
+        {
+          event: "auth.token_change_callback.error",
+          error: error instanceof Error ? error.message : String(error),
+        },
+        "Santos auth token change callback failed.",
+      );
+    }
   }
 }
 
@@ -144,6 +233,48 @@ function parseExpiresIn(value: string | number | undefined): number {
   const seconds = Number(value ?? 3600);
   const safeSeconds = Number.isFinite(seconds) && seconds > 0 ? seconds : 3600;
   return safeSeconds * 1000;
+}
+
+function normalizeAccessTokenExpiresAt(value: number | string | Date | null | undefined): number {
+  if (value instanceof Date) {
+    return normalizeEpochMs(value.getTime());
+  }
+
+  if (typeof value === "number") {
+    return normalizeEpochMs(value);
+  }
+
+  if (typeof value === "string" && value.trim()) {
+    const asNumber = Number(value);
+
+    if (Number.isFinite(asNumber)) {
+      return normalizeEpochMs(asNumber);
+    }
+
+    return normalizeEpochMs(Date.parse(value));
+  }
+
+  return 0;
+}
+
+function normalizeEpochMs(value: number): number {
+  if (!Number.isFinite(value) || value <= 0) {
+    return 0;
+  }
+
+  return value < 10_000_000_000 ? value * 1000 : value;
+}
+
+function normalizeRefreshSkewMs(value: number | undefined): number {
+  if (value === undefined) {
+    return 60_000;
+  }
+
+  if (!Number.isFinite(value) || value < 0) {
+    throw new OnaiValidationError("authRefreshSkewMs must be a non-negative number.");
+  }
+
+  return value;
 }
 
 async function readJson<T>(response: Response): Promise<T> {

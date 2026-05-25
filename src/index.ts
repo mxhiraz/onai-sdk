@@ -2,6 +2,7 @@ import { resolveOnaiConfig, type OnaiClientConfig } from "./config.js";
 import { FirebaseTokenProvider } from "./internal/auth.js";
 import { CustomModelsResource } from "./internal/custom-models.js";
 import { SantosGraphqlClient } from "./internal/graphql.js";
+import { AuthResource } from "./resources/auth.js";
 import { CharactersResource } from "./resources/characters.js";
 import {
   ImageGenerationAspectRatio,
@@ -20,6 +21,13 @@ import { RawResource } from "./resources/raw.js";
 import { UploadsResource } from "./resources/uploads.js";
 
 export { OnaiSdkError, OnaiAuthError, OnaiApiError, OnaiValidationError } from "./internal/errors.js";
+export { AuthResource } from "./resources/auth.js";
+export type {
+  GetOnaiAuthTokenStateInput,
+  OnaiAuthTokenChangeHandler,
+  OnaiAuthTokenState,
+  OnaiPersistedAuthTokenState,
+} from "./internal/auth.js";
 export type { OnaiLogger, OnaiLoggerConfig, OnaiLogLevel, OnaiLogMethod } from "./internal/logger.js";
 export {
   ImageGenerationAspectRatio,
@@ -97,6 +105,7 @@ export type {
 } from "./resources/uploads.js";
 
 export interface OnaiClient {
+  auth: AuthResource;
   images: ImagesResource;
   generations: ImagesResource;
   /** @beta APIs in this namespace can change before they become stable. */
@@ -121,6 +130,10 @@ export function createOnaiClient(config: OnaiClientConfig): OnaiClient {
     firebaseRefreshTokenEndpoint: resolvedConfig.firebaseRefreshTokenEndpoint,
     fetch: resolvedConfig.fetch,
     logger: resolvedConfig.logger.child({ component: "auth" }),
+    accessToken: resolvedConfig.accessToken,
+    accessTokenExpiresAt: resolvedConfig.accessTokenExpiresAt,
+    authRefreshSkewMs: resolvedConfig.authRefreshSkewMs,
+    onAuthTokenChange: resolvedConfig.onAuthTokenChange,
   });
 
   const graphql = new SantosGraphqlClient({
@@ -151,6 +164,7 @@ export function createOnaiClient(config: OnaiClientConfig): OnaiClient {
   });
 
   return {
+    auth: new AuthResource(tokenProvider),
     images,
     generations: images,
     beta: {

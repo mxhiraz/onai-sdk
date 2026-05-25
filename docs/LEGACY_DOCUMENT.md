@@ -31,7 +31,7 @@ The SDK must never run in browser code because it handles refresh tokens. Every 
 The current release path is GitHub. Install a pinned release tag in backend projects:
 
 ```bash
-npm install github:mxhiraz/onai-sdk#v0.1.7
+npm install github:mxhiraz/onai-sdk#v0.1.8
 ```
 
 In `package.json`:
@@ -39,7 +39,7 @@ In `package.json`:
 ```json
 {
   "dependencies": {
-    "onai-sdk": "github:mxhiraz/onai-sdk#v0.1.7"
+    "onai-sdk": "github:mxhiraz/onai-sdk#v0.1.8"
   }
 }
 ```
@@ -47,7 +47,7 @@ In `package.json`:
 You can also install from the HTTPS Git URL:
 
 ```bash
-npm install git+https://github.com/mxhiraz/onai-sdk.git#v0.1.7
+npm install git+https://github.com/mxhiraz/onai-sdk.git#v0.1.8
 ```
 
 The package includes a `prepare` script, so GitHub installs build `dist` automatically before the SDK is packed for the consuming project.
@@ -160,15 +160,15 @@ git push
 Optional version tag:
 
 ```bash
-git tag v0.1.7
-git push origin v0.1.7
+git tag v0.1.8
+git push origin v0.1.8
 ```
 
 Downstream apps can install a branch, tag, or commit:
 
 ```bash
 npm install github:mxhiraz/onai-sdk#main
-npm install github:mxhiraz/onai-sdk#v0.1.7
+npm install github:mxhiraz/onai-sdk#v0.1.8
 npm install git+https://github.com/mxhiraz/onai-sdk.git#<commit-sha>
 ```
 
@@ -232,6 +232,7 @@ The stable modules are:
 
 | Module | Stability | Responsibility |
 |---|---:|---|
+| `onai.auth` | Stable | Read or refresh persistable auth token state for backend caching. |
 | `onai.uploads` | Stable | Create upload URLs, upload source-image bytes, and parse uploaded image references. |
 | `onai.products` | Stable | Create, list, and search product models. |
 | `onai.characters` | Stable | Create, list, and search character models. |
@@ -430,11 +431,88 @@ Recommended storage fields:
 | `refreshToken` | Yes | Store encrypted at rest. Never return to browser code. |
 | `firebaseApiKey` | Yes | Required for token refresh. Store server-side. |
 | `workspaceId` | Yes | Default workspace for SDK calls. |
+| `accessToken` | Optional | Cache the current bearer token to avoid refreshing on every SDK client creation. Store encrypted at rest. |
+| `accessTokenExpiresAt` | Optional | Epoch milliseconds for `accessToken` expiry. Required when storing `accessToken`. |
 | `createdAt` | Yes | Useful for account lifecycle and audits. |
 | `updatedAt` | Yes | Useful when credentials rotate. |
 | `revokedAt` | Optional | Mark disconnected accounts without deleting audit history. |
 
 Create the SDK client inside the request handler or background job after loading the account. Avoid a global singleton when each user has different credentials.
+
+## Auth Token Cache
+
+The SDK client is cheap to create per request. The expensive part is refreshing a Firebase token every time a new SDK client is created with only a refresh token. To avoid that latency, persist the SDK auth token state in your database and pass it back into the next SDK client.
+
+Recommended request flow:
+
+```mermaid
+sequenceDiagram
+  participant API as Your API route
+  participant DB as Database
+  participant SDK as OnAI SDK
+  participant Auth as Firebase token endpoint
+  participant Santos as Santos GraphQL
+
+  API->>DB: Load account with authTokenState
+  API->>SDK: createOnaiClient({ authTokenState, onAuthTokenChange })
+  SDK->>SDK: Check accessTokenExpiresAt
+  alt token valid
+    SDK->>Santos: Use cached accessToken
+  else token missing or near expiry
+    SDK->>Auth: Refresh using refreshToken
+    Auth-->>SDK: New accessToken, refreshToken, expiry
+    SDK->>DB: onAuthTokenChange(new state)
+    SDK->>Santos: Use new accessToken
+  end
+```
+
+Example:
+
+```ts
+const account = await db.connectedAccounts.findByUserId(userId);
+
+const onai = createOnaiClient({
+  firebaseApiKey: account.firebaseApiKey,
+  workspaceId: account.workspaceId,
+  authTokenState: {
+    accessToken: account.accessToken,
+    accessTokenExpiresAt: account.accessTokenExpiresAt,
+    refreshToken: account.refreshToken,
+  },
+  onAuthTokenChange: async (state) => {
+    await db.connectedAccounts.update(userId, {
+      accessToken: state.accessToken,
+      accessTokenExpiresAt: state.accessTokenExpiresAt,
+      refreshToken: state.refreshToken,
+    });
+  },
+});
+
+const cooldown = await onai.images.cooldownStatus();
+```
+
+Standalone auth module:
+
+```ts
+const state = await onai.auth.getTokenState();
+
+await db.connectedAccounts.update(userId, {
+  accessToken: state.accessToken,
+  accessTokenExpiresAt: state.accessTokenExpiresAt,
+  refreshToken: state.refreshToken,
+});
+```
+
+Use `onai.auth.refreshTokenState()` when you intentionally want to force a refresh, for example during account connection or credential repair.
+
+Auth cache rules:
+
+- `authTokenState.accessToken` is used only when `accessTokenExpiresAt` is still outside the refresh window.
+- The SDK refreshes automatically when the token is missing, expired, or close to expiry.
+- The default refresh window is 60 seconds. Override it with `authRefreshSkewMs` only when you understand your job duration and clock drift.
+- If a refresh response includes a new refresh token, the SDK includes it in `onAuthTokenChange`.
+- Always store auth token state server-side and encrypted at rest.
+- If `onAuthTokenChange` fails, the SDK logs a warning and continues the current request. To guarantee persistence, call `onai.auth.getTokenState()` after the SDK task and save the returned state.
 
 ## Logging
 
@@ -786,9 +864,10 @@ VideoGenerationCameraMotion.Auto; // "AUTO"
 The SDK is server-side only. Preserve these rules:
 
 - Never import this SDK in frontend bundles.
-- Never expose refresh tokens, Firebase API keys, signed upload URLs, or workspace credentials to browser logs.
+- Never expose refresh tokens, access tokens, Firebase API keys, signed upload URLs, or workspace credentials to browser logs.
 - The SDK sends Santos-compatible browser-style headers automatically and does not expose public custom header overrides.
 - Store refresh tokens encrypted at rest.
+- Store persisted `authTokenState` encrypted at rest.
 - Create SDK clients per tenant when accounts differ.
 - Return generated asset URLs and safe status fields to the browser, not raw API payloads.
 - Keep user-facing errors branded as Santos and avoid exposing raw upstream response bodies.
@@ -856,6 +935,7 @@ Run this checklist whenever the SDK changes:
 - Keep package exports pointed at `dist`.
 - Keep `docs` included in `package.json` files.
 - Keep automatic request header behavior documented when config changes.
+- Keep auth token cache behavior documented when auth state fields, refresh timing, or callback behavior changes.
 - Keep logging behavior documented when logger events, log levels, or redaction rules change.
 - Do not pass `search` into Santos custom-model or generation-history GraphQL list operations unless the schema starts accepting it.
 - Run `npm run build`.
@@ -876,7 +956,7 @@ Use this prompt when asking an AI coding assistant to integrate or update the SD
 ```text
 You are integrating the OnAI server-side TypeScript SDK. Keep the SDK server-only. Load refreshToken, firebaseApiKey, and workspaceId from server-side configuration or the app database for each connected account. Do not expose credentials to browser code.
 
-Use onai.uploads for source-image uploads, onai.products for product models, onai.characters for character models, onai.models only for listing all models, onai.images for stable image generation, and onai.beta.videos only for beta video generation. Product and character creation can accept either an uploaded image reference or a direct upload payload with fileName, contentType, and body. For backend observability, pass logger: true or a Fastify/Pino-style logger and choose logLevel. After creating a generation, call waitFor(id) to fetch the READY generation and read originalImageUrl/originalImageUrls. Keep video behind beta controls. Use exported enums instead of raw strings where possible.
+Use onai.auth for persisted auth token state, onai.uploads for source-image uploads, onai.products for product models, onai.characters for character models, onai.models only for listing all models, onai.images for stable image generation, and onai.beta.videos only for beta video generation. Load authTokenState from the database when creating the SDK client and save onAuthTokenChange back to the database so the SDK does not refresh auth on every request. Product and character creation can accept either an uploaded image reference or a direct upload payload with fileName, contentType, and body. For backend observability, pass logger: true or a Fastify/Pino-style logger and choose logLevel. After creating a generation, call waitFor(id) to fetch the READY generation and read originalImageUrl/originalImageUrls. Keep video behind beta controls. Use exported enums instead of raw strings where possible.
 
 Preserve Santos branding in public docs and user-facing errors. Do not expose raw upstream errors. After changes, run npm run build and scan for stale stable video references, non-Santos branding, and .ts import endings.
 ```

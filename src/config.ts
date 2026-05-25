@@ -1,10 +1,11 @@
 import { OnaiValidationError } from "./internal/errors.js";
+import type { OnaiAuthTokenChangeHandler, OnaiPersistedAuthTokenState } from "./internal/auth.js";
 import { resolveOnaiLogger, type OnaiLoggerConfig, type OnaiLogLevel, type ResolvedOnaiLogger } from "./internal/logger.js";
 import { resolveOnaiRequestHeaders, type ResolvedOnaiRequestHeaders } from "./internal/request-headers.js";
 import { resolveOnaiRuntimeUrls, type OnaiRuntimeUrlOverrides } from "./runtime-config.js";
 
 export interface OnaiClientConfig {
-  refreshToken: string;
+  refreshToken?: string | undefined;
   firebaseApiKey: string;
   workspaceId: string;
   urls?: OnaiRuntimeUrlOverrides | undefined;
@@ -14,6 +15,11 @@ export interface OnaiClientConfig {
   referer?: string | undefined;
   logger?: OnaiLoggerConfig | undefined;
   logLevel?: OnaiLogLevel | undefined;
+  accessToken?: string | null | undefined;
+  accessTokenExpiresAt?: number | string | Date | null | undefined;
+  authTokenState?: OnaiPersistedAuthTokenState | undefined;
+  authRefreshSkewMs?: number | undefined;
+  onAuthTokenChange?: OnaiAuthTokenChangeHandler | undefined;
 }
 
 export interface ResolvedOnaiClientConfig {
@@ -27,6 +33,10 @@ export interface ResolvedOnaiClientConfig {
   firebaseRefreshTokenEndpoint: string;
   headers: ResolvedOnaiRequestHeaders;
   logger: ResolvedOnaiLogger;
+  accessToken: string | null | undefined;
+  accessTokenExpiresAt: number | string | Date | null | undefined;
+  authRefreshSkewMs: number | undefined;
+  onAuthTokenChange: OnaiAuthTokenChangeHandler | undefined;
 }
 
 export function resolveOnaiConfig(config: OnaiClientConfig): ResolvedOnaiClientConfig {
@@ -57,7 +67,7 @@ export function resolveOnaiConfig(config: OnaiClientConfig): ResolvedOnaiClientC
   const runtimeUrls = resolveOnaiRuntimeUrls(runtimeUrlOverrides);
 
   return {
-    refreshToken: requireNonEmpty(config.refreshToken, "refreshToken"),
+    refreshToken: requireNonEmpty(config.authTokenState?.refreshToken ?? config.refreshToken, "refreshToken"),
     firebaseApiKey: requireNonEmpty(config.firebaseApiKey, "firebaseApiKey"),
     workspaceId: requireNonEmpty(config.workspaceId, "workspaceId"),
     endpoint: runtimeUrls.graphqlEndpoint,
@@ -67,6 +77,10 @@ export function resolveOnaiConfig(config: OnaiClientConfig): ResolvedOnaiClientC
     firebaseRefreshTokenEndpoint: runtimeUrls.firebaseRefreshTokenEndpoint,
     headers: resolveOnaiRequestHeaders(),
     logger: resolveOnaiLogger(config.logger, config.logLevel),
+    accessToken: config.authTokenState?.accessToken ?? config.accessToken,
+    accessTokenExpiresAt: config.authTokenState?.accessTokenExpiresAt ?? config.accessTokenExpiresAt,
+    authRefreshSkewMs: config.authRefreshSkewMs,
+    onAuthTokenChange: config.onAuthTokenChange,
   };
 }
 
@@ -76,7 +90,7 @@ function assertServerRuntime(): void {
   }
 }
 
-function requireNonEmpty(value: string, field: string): string {
+function requireNonEmpty(value: string | undefined, field: string): string {
   if (typeof value !== "string" || value.trim().length === 0) {
     throw new OnaiValidationError(`${field} is required.`);
   }
