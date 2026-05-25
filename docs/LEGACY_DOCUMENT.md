@@ -31,7 +31,7 @@ The SDK must never run in browser code because it handles refresh tokens. Every 
 The current release path is GitHub. Install a pinned release tag in backend projects:
 
 ```bash
-npm install github:mxhiraz/onai-sdk#v0.1.2
+npm install github:mxhiraz/onai-sdk#v0.1.3
 ```
 
 In `package.json`:
@@ -39,7 +39,7 @@ In `package.json`:
 ```json
 {
   "dependencies": {
-    "onai-sdk": "github:mxhiraz/onai-sdk#v0.1.2"
+    "onai-sdk": "github:mxhiraz/onai-sdk#v0.1.3"
   }
 }
 ```
@@ -47,7 +47,7 @@ In `package.json`:
 You can also install from the HTTPS Git URL:
 
 ```bash
-npm install git+https://github.com/mxhiraz/onai-sdk.git#v0.1.2
+npm install git+https://github.com/mxhiraz/onai-sdk.git#v0.1.3
 ```
 
 The package includes a `prepare` script, so GitHub installs build `dist` automatically before the SDK is packed for the consuming project.
@@ -160,15 +160,15 @@ git push
 Optional version tag:
 
 ```bash
-git tag v0.1.2
-git push origin v0.1.2
+git tag v0.1.3
+git push origin v0.1.3
 ```
 
 Downstream apps can install a branch, tag, or commit:
 
 ```bash
 npm install github:mxhiraz/onai-sdk#main
-npm install github:mxhiraz/onai-sdk#v0.1.2
+npm install github:mxhiraz/onai-sdk#v0.1.3
 npm install git+https://github.com/mxhiraz/onai-sdk.git#<commit-sha>
 ```
 
@@ -386,7 +386,7 @@ const products = await onai.products.search("shirt");
 const characters = await onai.characters.search("tom");
 ```
 
-Search is sent to Santos as a GraphQL input, then product and character shortcuts apply their model-type narrowing.
+The Santos custom-model list operation currently rejects a `search` input. The SDK therefore lists workspace models first and narrows the returned set by model text for `models.search()`, `products.search()`, and `characters.search()`. Product and character shortcuts also apply their model-type narrowing.
 
 ### Generate Image
 
@@ -613,7 +613,7 @@ Run this checklist whenever the SDK changes:
 - Keep package exports pointed at `dist`.
 - Keep `docs` included in `package.json` files.
 - Keep automatic request header behavior documented when config changes.
-- Keep search server-side; do not add JavaScript text matching for SDK search methods.
+- Keep generation search server-side. Do not pass `search` into the Santos custom-model list GraphQL operation unless the schema starts accepting it.
 - Run `npm run build`.
 - Scan for accidental non-Santos branding, `.ts` import endings, and stale stable video references.
 

@@ -115,7 +115,6 @@ export class CustomModelsResource {
       operationName: "imageGenerationCustomModels",
       variables: {
         workspaceId,
-        search: normalizeSearch(input.search),
       },
       query: IMAGE_GENERATION_CUSTOM_MODELS_QUERY,
     });
@@ -125,8 +124,14 @@ export class CustomModelsResource {
 }
 
 function filterCustomModels(models: CustomModel[], input: ListCustomModelsInput): CustomModel[] {
+  const search = normalizeSearch(input.search);
+
   return models.filter((model) => {
     if (input.type && model.modelType !== input.type) {
+      return false;
+    }
+
+    if (search && !matchesCustomModelSearch(model, search)) {
       return false;
     }
 
@@ -134,9 +139,21 @@ function filterCustomModels(models: CustomModel[], input: ListCustomModelsInput)
   });
 }
 
-function normalizeSearch(search: string | undefined): string | null {
+function normalizeSearch(search: string | undefined): string | undefined {
   const normalized = search?.trim();
-  return normalized ? normalized : null;
+  return normalized ? normalized.toLowerCase() : undefined;
+}
+
+function matchesCustomModelSearch(model: CustomModel, search: string): boolean {
+  return [
+    model.id,
+    model.modelName,
+    model.canonicalName,
+    model.tokenConcept,
+    model.category,
+    model.subcategory,
+    model.objectDescription,
+  ].some((value) => typeof value === "string" && value.toLowerCase().includes(search));
 }
 
 function normalizeSourceImages(input: CreateCustomModelInput): Array<Required<CustomModelImageInput>> {
@@ -239,8 +256,8 @@ const IMAGE_GENERATION_CUSTOM_MODEL_CREATE_MUTATION = `mutation imageGenerationC
 
 ${CUSTOM_MODEL_BASIC_FIELDS_FRAGMENT}`;
 
-const IMAGE_GENERATION_CUSTOM_MODELS_QUERY = `query imageGenerationCustomModels($workspaceId: String!, $search: String) {
-  imageGenerationCustomModels(input: {workspaceId: $workspaceId, search: $search}) {
+const IMAGE_GENERATION_CUSTOM_MODELS_QUERY = `query imageGenerationCustomModels($workspaceId: String!) {
+  imageGenerationCustomModels(input: {workspaceId: $workspaceId}) {
     ...CustomModelBasicFields
     __typename
   }
