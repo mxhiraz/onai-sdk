@@ -131,10 +131,13 @@ export interface ImageCooldownStatusInput {
 export interface ListImageGenerationsInput {
   workspaceId?: string;
   id?: string;
+  ids?: string[];
   status?: string;
   assetType?: ImageGenerationAssetType;
+  bulkGenerationId?: string;
   cursor?: string | null;
   limit?: number;
+  pageSize?: number;
   maxPages?: number;
 }
 
@@ -147,6 +150,14 @@ export interface WaitForImageGenerationInput extends GetImageGenerationInput {
   timeoutMs?: number;
   targetStatus?: string;
   terminalStatuses?: string[];
+}
+
+export interface WaitForBatchImageGenerationsInput extends WaitForImageGenerationInput {
+  limit?: number;
+  maxPages?: number;
+  onProgress?: (id: string, generation: ImageGeneration) => void | Promise<void>;
+  onReady?: (id: string, generation: ImageGeneration) => void | Promise<void>;
+  onFail?: (id: string, reason: string, generation: ImageGeneration) => void | Promise<void>;
 }
 
 export interface ImageGenerationsPageInfo {
@@ -375,6 +386,20 @@ export class ImagesResource {
     });
   }
 
+  async waitForBatch(
+    ids: string[],
+    input: WaitForBatchImageGenerationsInput = {},
+  ): Promise<Map<string, ImageGeneration>> {
+    return waitForGenerationBatch({
+      graphql: this.graphql,
+      logger: this.logger,
+      defaultWorkspaceId: this.workspaceId,
+      ids,
+      input,
+      forcedAssetType: "IMAGE",
+    });
+  }
+
   async cooldownStatus(input: ImageCooldownStatusInput = {}): Promise<UserFreeImageCooldownStatus> {
     return this.freeImageCooldownStatus(input);
   }
@@ -500,6 +525,20 @@ export class BetaVideosResource {
     });
   }
 
+  async waitForBatch(
+    ids: string[],
+    input: WaitForBatchImageGenerationsInput = {},
+  ): Promise<Map<string, ImageGeneration>> {
+    return waitForGenerationBatch({
+      graphql: this.graphql,
+      logger: this.logger,
+      defaultWorkspaceId: this.workspaceId,
+      ids,
+      input,
+      forcedAssetType: "VIDEO",
+    });
+  }
+
   modelConfig(model: CustomModel, imageUrl?: string): ImageGenerationModelConfig {
     const resolvedImageUrl = imageUrl ?? model.imageOptions?.[0]?.url ?? model.thumbUrl;
 
@@ -593,6 +632,15 @@ interface ListGenerationsRequest {
   forcedAssetType?: ImageGenerationAssetType | undefined;
 }
 
+interface GenerationBatchLookupRequest {
+  graphql: SantosGraphqlClient;
+  logger: ResolvedOnaiLogger;
+  defaultWorkspaceId: string;
+  ids: string[];
+  input: WaitForBatchImageGenerationsInput;
+  forcedAssetType?: ImageGenerationAssetType | undefined;
+}
+
 async function listGenerationPage(request: ListGenerationsRequest): Promise<ImageGenerationsPage> {
   const input = request.input;
   const workspaceId = requireNonEmpty(input.workspaceId ?? request.defaultWorkspaceId, "workspaceId");
@@ -603,6 +651,7 @@ async function listGenerationPage(request: ListGenerationsRequest): Promise<Imag
       workspaceId,
       assetType: request.forcedAssetType ?? input.assetType,
       limit: input.limit ?? 20,
+      pageSize: input.pageSize ?? input.limit ?? 20,
       hasCursor: Boolean(input.cursor),
       id: input.id,
       status: input.status,
@@ -614,7 +663,10 @@ async function listGenerationPage(request: ListGenerationsRequest): Promise<Imag
     operationName: "imageGenerations",
     variables: {
       workspaceId,
-      first: normalizePositiveInteger(input.limit ?? 20, "limit"),
+      first: normalizePositiveInteger(
+        input.pageSize ?? input.limit ?? 20,
+        input.pageSize === undefined ? "limit" : "pageSize",
+      ),
       cursor: input.cursor ?? null,
     },
     query: IMAGE_GENERATIONS_QUERY,
@@ -658,8 +710,6 @@ async function listAllGenerations(request: ListGenerationsRequest): Promise<Imag
       ...input,
       cursor,
     };
-
-    delete pageInput.limit;
 
     const page = await listGenerationPage({
       ...request,
@@ -782,12 +832,158 @@ async function waitForGeneration(
   });
 }
 
+async function waitForGenerationBatch(request: GenerationBatchLookupRequest): Promise<Map<string, ImageGeneration>> {
+  const ids = normalizeGenerationIds(request.ids, "ids");
+  const idSet = new Set(ids);
+  const targetStatus = request.input.targetStatus ?? "READY";
+  const terminalStatuses = new Set(request.input.terminalStatuses ?? ["FAILED", "ERROR", "CANCELED", "CANCELLED"]);
+  const timeoutMs = normalizePositiveNumber(request.input.timeoutMs ?? 180_000, "timeoutMs");
+  const intervalMs = normalizePositiveNumber(request.input.intervalMs ?? 3_000, "intervalMs");
+  const pageLimit = normalizePositiveInteger(request.input.limit ?? Math.max(ids.length, 20), "limit");
+  const maxPages = normalizePositiveInteger(request.input.maxPages ?? 1, "maxPages");
+  const readyGenerations = new Map<string, ImageGeneration>();
+  const failedGenerations = new Map<string, { generation: ImageGeneration; reason: string }>();
+  const startedAt = Date.now();
+
+  request.logger.info(
+    {
+      event: "generation.wait_batch.start",
+      generationCount: ids.length,
+      targetStatus,
+      timeoutMs,
+      intervalMs,
+      pageLimit,
+      maxPages,
+      assetType: request.forcedAssetType,
+    },
+    "Santos generation batch wait started.",
+  );
+
+  while (Date.now() - startedAt <= timeoutMs) {
+    const listInput: ListImageGenerationsInput = {
+      ids,
+      limit: pageLimit,
+      pageSize: pageLimit,
+      maxPages,
+    };
+
+    if (request.input.workspaceId) {
+      listInput.workspaceId = request.input.workspaceId;
+    }
+
+    const generations = await listAllGenerations({
+      graphql: request.graphql,
+      logger: request.logger,
+      defaultWorkspaceId: request.defaultWorkspaceId,
+      input: listInput,
+      forcedAssetType: request.forcedAssetType,
+    });
+
+    for (const generation of generations) {
+      if (!idSet.has(generation.id) || readyGenerations.has(generation.id) || failedGenerations.has(generation.id)) {
+        continue;
+      }
+
+      if (generation.status === targetStatus) {
+        readyGenerations.set(generation.id, generation);
+        await request.input.onReady?.(generation.id, generation);
+        continue;
+      }
+
+      if (terminalStatuses.has(generation.status)) {
+        const reason = generation.statusMessage ?? generation.status;
+        failedGenerations.set(generation.id, {
+          generation,
+          reason,
+        });
+        await request.input.onFail?.(generation.id, reason, generation);
+        continue;
+      }
+
+      await request.input.onProgress?.(generation.id, generation);
+    }
+
+    request.logger.trace(
+      {
+        event: "generation.wait_batch.poll",
+        readyCount: readyGenerations.size,
+        failedCount: failedGenerations.size,
+        pendingCount: ids.length - readyGenerations.size - failedGenerations.size,
+        elapsedMs: Date.now() - startedAt,
+      },
+      "Santos generation batch wait poll completed.",
+    );
+
+    if (failedGenerations.size > 0) {
+      const failures = Object.fromEntries(
+        [...failedGenerations].map(([id, failure]) => [
+          id,
+          {
+            status: failure.generation.status,
+            reason: failure.reason,
+          },
+        ]),
+      );
+
+      request.logger.warn(
+        {
+          event: "generation.wait_batch.terminal",
+          failures,
+          elapsedMs: Date.now() - startedAt,
+        },
+        "One or more Santos batch generations reached a terminal status.",
+      );
+
+      throw new OnaiApiError("One or more generations did not complete.", {
+        details: {
+          failures,
+        },
+      });
+    }
+
+    if (readyGenerations.size === ids.length) {
+      request.logger.info(
+        {
+          event: "generation.wait_batch.success",
+          generationCount: ids.length,
+          elapsedMs: Date.now() - startedAt,
+        },
+        "Santos generation batch wait completed.",
+      );
+
+      return new Map(ids.map((id) => [id, readyGenerations.get(id) as ImageGeneration]));
+    }
+
+    await sleep(intervalMs);
+  }
+
+  const pendingIds = ids.filter((id) => !readyGenerations.has(id));
+  request.logger.warn(
+    {
+      event: "generation.wait_batch.timeout",
+      pendingIds,
+      readyCount: readyGenerations.size,
+      timeoutMs,
+    },
+    "Santos generation batch wait timed out.",
+  );
+
+  throw new OnaiApiError("Timed out waiting for generations.", {
+    details: {
+      pendingIds,
+      readyIds: [...readyGenerations.keys()],
+      timeoutMs,
+    },
+  });
+}
+
 function generationLookupInput(
   request: GenerationLookupRequest<GetImageGenerationInput | WaitForImageGenerationInput>,
 ): ListImageGenerationsInput {
   const input: ListImageGenerationsInput = {
     id: requireNonEmpty(request.id, "id"),
     limit: 1,
+    pageSize: 20,
   };
 
   if (request.input.workspaceId) {
@@ -804,11 +1000,16 @@ function filterGenerationsPage(
 ): ImageGenerationsPage {
   const assetType = forcedAssetType ?? input.assetType;
   const limit = input.limit === undefined ? undefined : normalizePositiveInteger(input.limit, "limit");
+  const ids = normalizeOptionalGenerationIds(input.ids, "ids");
 
   let imageGenerations = page.imageGenerations.map(normalizeGenerationOutput);
 
   if (input.id) {
     imageGenerations = imageGenerations.filter((generation) => generation.id === input.id);
+  }
+
+  if (ids) {
+    imageGenerations = imageGenerations.filter((generation) => ids.has(generation.id));
   }
 
   if (input.status) {
@@ -817,6 +1018,10 @@ function filterGenerationsPage(
 
   if (assetType) {
     imageGenerations = imageGenerations.filter((generation) => generation.assetType === assetType);
+  }
+
+  if (input.bulkGenerationId) {
+    imageGenerations = imageGenerations.filter((generation) => generation.bulkGenerationId === input.bulkGenerationId);
   }
 
   if (limit !== undefined) {
@@ -861,6 +1066,26 @@ function normalizeModelConfig(model: ImageGenerationModelConfig): ImageGeneratio
     imageUrl: requireNonEmpty(model.imageUrl, "models[].imageUrl"),
     modelType: model.modelType,
   };
+}
+
+function normalizeOptionalGenerationIds(ids: string[] | undefined, field: string): Set<string> | undefined {
+  if (ids === undefined) {
+    return undefined;
+  }
+
+  return new Set(normalizeGenerationIds(ids, field));
+}
+
+function normalizeGenerationIds(ids: string[], field: string): string[] {
+  if (!Array.isArray(ids) || ids.length === 0) {
+    throw new OnaiValidationError(`${field} must include at least one id.`);
+  }
+
+  return [
+    ...new Set(
+      ids.map((id, index) => requireNonEmpty(id, `${field}[${index}]`)),
+    ),
+  ];
 }
 
 function requireNonEmpty(value: string | null | undefined, field: string): string {

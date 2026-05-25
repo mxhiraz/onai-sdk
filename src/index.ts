@@ -79,6 +79,7 @@ export type {
   SizeInput,
   StudioListItem,
   UserFreeImageCooldownStatus,
+  WaitForBatchImageGenerationsInput,
   WaitForImageGenerationInput,
 } from "./resources/images.js";
 export type { AiModel, ListModelsInput } from "./resources/models.js";
