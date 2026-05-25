@@ -5,7 +5,7 @@ Server-side TypeScript SDK for Santos image-generation workflows.
 The single SDK guide is [docs/LEGACY_DOCUMENT.md](docs/LEGACY_DOCUMENT.md). It includes installation, configuration, request headers, uploads, products, characters, image generation, beta video generation, raw GraphQL, security rules, and maintenance policy.
 
 ```bash
-npm install github:mxhiraz/onai-sdk#v0.1.4
+npm install github:mxhiraz/onai-sdk#v0.1.5
 ```
 
 For local development:

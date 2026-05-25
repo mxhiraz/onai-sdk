@@ -31,7 +31,7 @@ The SDK must never run in browser code because it handles refresh tokens. Every 
 The current release path is GitHub. Install a pinned release tag in backend projects:
 
 ```bash
-npm install github:mxhiraz/onai-sdk#v0.1.4
+npm install github:mxhiraz/onai-sdk#v0.1.5
 ```
 
 In `package.json`:
@@ -39,7 +39,7 @@ In `package.json`:
 ```json
 {
   "dependencies": {
-    "onai-sdk": "github:mxhiraz/onai-sdk#v0.1.4"
+    "onai-sdk": "github:mxhiraz/onai-sdk#v0.1.5"
   }
 }
 ```
@@ -47,7 +47,7 @@ In `package.json`:
 You can also install from the HTTPS Git URL:
 
 ```bash
-npm install git+https://github.com/mxhiraz/onai-sdk.git#v0.1.4
+npm install git+https://github.com/mxhiraz/onai-sdk.git#v0.1.5
 ```
 
 The package includes a `prepare` script, so GitHub installs build `dist` automatically before the SDK is packed for the consuming project.
@@ -160,15 +160,15 @@ git push
 Optional version tag:
 
 ```bash
-git tag v0.1.4
-git push origin v0.1.4
+git tag v0.1.5
+git push origin v0.1.5
 ```
 
 Downstream apps can install a branch, tag, or commit:
 
 ```bash
 npm install github:mxhiraz/onai-sdk#main
-npm install github:mxhiraz/onai-sdk#v0.1.4
+npm install github:mxhiraz/onai-sdk#v0.1.5
 npm install git+https://github.com/mxhiraz/onai-sdk.git#<commit-sha>
 ```
 
@@ -420,10 +420,9 @@ You can also inspect generation history directly:
 ```ts
 const recentImages = await onai.images.list({ limit: 10 });
 const generationById = await onai.images.get(generation.id);
-const matchingImages = await onai.images.search("tom", { limit: 20 });
 ```
 
-Generation search is sent to Santos. `list()` and `search()` follow `pageInfo.nextCursor` across server-filtered pages until they reach `limit`, run out of pages, or hit `maxPages` (default `50`). Use `listPage({ cursor })` when you want to control pagination manually.
+Santos generation history requires `first` and does not accept a `search` input on `imageGenerations`. The SDK sends `first` from `limit`, follows `pageInfo.nextCursor` until it reaches `limit`, runs out of pages, or hits `maxPages` (default `50`). Use `listPage({ cursor, limit })` when you want to control pagination manually.
 
 Prompt mentions and model configs must stay aligned. If the prompt references a model, include that model in `models` unless a lower-level raw operation intentionally does otherwise.
 
@@ -575,7 +574,6 @@ Current beta APIs:
 - `onai.beta.videos.generate()`
 - `onai.beta.videos.create()`
 - `onai.beta.videos.list()`
-- `onai.beta.videos.search()`
 - `onai.beta.videos.get()`
 - `onai.beta.videos.waitFor()`
 - `onai.beta.videos.modelConfig()`
@@ -613,7 +611,7 @@ Run this checklist whenever the SDK changes:
 - Keep package exports pointed at `dist`.
 - Keep `docs` included in `package.json` files.
 - Keep automatic request header behavior documented when config changes.
-- Keep generation search server-side. Do not pass `search` into the Santos custom-model list GraphQL operation unless the schema starts accepting it.
+- Do not pass `search` into Santos custom-model or generation-history GraphQL list operations unless the schema starts accepting it.
 - Run `npm run build`.
 - Scan for accidental non-Santos branding, `.ts` import endings, and stale stable video references.
 

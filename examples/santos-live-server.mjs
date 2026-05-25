@@ -81,14 +81,12 @@ async function handleApiRequest(path, onai, body) {
 
     case "/api/images":
       return onai.images.list({
-        search: optionalString(body.search),
         limit: optionalNumber(body.limit, 12),
         maxPages: optionalNumber(body.maxPages, 2),
       });
 
     case "/api/videos":
       return onai.beta.videos.list({
-        search: optionalString(body.search),
         limit: optionalNumber(body.limit, 12),
         maxPages: optionalNumber(body.maxPages, 2),
       });

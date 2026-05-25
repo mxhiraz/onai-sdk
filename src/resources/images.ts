@@ -130,7 +130,6 @@ export interface ImageCooldownStatusInput {
 export interface ListImageGenerationsInput {
   workspaceId?: string;
   id?: string;
-  search?: string;
   status?: string;
   assetType?: ImageGenerationAssetType;
   cursor?: string | null;
@@ -346,13 +345,6 @@ export class ImagesResource {
     });
   }
 
-  search(query: string, input: Omit<ListImageGenerationsInput, "search"> = {}): Promise<ImageGeneration[]> {
-    return this.list({
-      ...input,
-      search: query,
-    });
-  }
-
   async get(id: string, input: GetImageGenerationInput = {}): Promise<ImageGeneration | null> {
     return getGeneration({
       graphql: this.graphql,
@@ -454,13 +446,6 @@ export class BetaVideosResource {
     });
   }
 
-  search(query: string, input: Omit<ListImageGenerationsInput, "search"> = {}): Promise<ImageGeneration[]> {
-    return this.list({
-      ...input,
-      search: query,
-    });
-  }
-
   async get(id: string, input: GetImageGenerationInput = {}): Promise<ImageGeneration | null> {
     return getGeneration({
       graphql: this.graphql,
@@ -554,8 +539,8 @@ async function listGenerationPage(request: ListGenerationsRequest): Promise<Imag
     operationName: "imageGenerations",
     variables: {
       workspaceId,
+      first: normalizePositiveInteger(input.limit ?? 20, "limit"),
       cursor: input.cursor ?? null,
-      search: normalizeSearch(input.search),
     },
     query: IMAGE_GENERATIONS_QUERY,
   });
@@ -740,11 +725,6 @@ function requireNonEmpty(value: string | null | undefined, field: string): strin
   }
 
   return value;
-}
-
-function normalizeSearch(search: string | undefined): string | null {
-  const normalized = search?.trim();
-  return normalized ? normalized : null;
 }
 
 function normalizePositiveNumber(value: number, field: string): number {
@@ -941,8 +921,8 @@ fragment StudioThumbnailFields on StudioThumbnail {
   __typename
 }`;
 
-const IMAGE_GENERATIONS_QUERY = `query imageGenerations($workspaceId: String!, $cursor: String, $search: String) {
-  imageGenerations(input: {workspaceId: $workspaceId, cursor: $cursor, search: $search}) {
+const IMAGE_GENERATIONS_QUERY = `query imageGenerations($workspaceId: String!, $first: Int!, $cursor: String) {
+  imageGenerations(input: {workspaceId: $workspaceId, first: $first, cursor: $cursor}) {
     pageInfo {
       nextCursor
       __typename
