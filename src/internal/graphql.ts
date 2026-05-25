@@ -59,8 +59,7 @@ export class SantosGraphqlClient {
         "apollo-require-preflight": "true",
         authorization: `Bearer ${token}`,
         "content-type": "application/json",
-        origin: this.origin,
-        referer: this.referer,
+        Referer: this.referer,
       }),
       body: JSON.stringify(request),
     });

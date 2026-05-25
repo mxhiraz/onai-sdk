@@ -4,7 +4,6 @@ type ConsentIntegrations = Record<string, boolean>;
 
 export interface ResolvedOnaiRequestHeaders {
   userAgent: string;
-  acceptLanguage: string;
   trackingContext: TrackingContext;
   consentIntegrations: ConsentIntegrations;
   browserHeaders: Record<string, string>;
@@ -12,16 +11,11 @@ export interface ResolvedOnaiRequestHeaders {
 
 const DEFAULT_BROWSER_USER_AGENT =
   "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/148.0.0.0 Safari/537.36";
-const DEFAULT_ACCEPT_LANGUAGE = "en-US,en;q=0.9";
 const DEFAULT_BROWSER_HEADERS = Object.freeze({
-  priority: "u=1, i",
+  "Sec-GPC": "1",
+  "sec-ch-ua-platform": '"macOS"',
   "sec-ch-ua": '"Chromium";v="148", "Google Chrome";v="148", "Not/A)Brand";v="99"',
   "sec-ch-ua-mobile": "?0",
-  "sec-ch-ua-platform": '"macOS"',
-  "sec-fetch-dest": "empty",
-  "sec-fetch-mode": "cors",
-  "sec-fetch-site": "cross-site",
-  "sec-gpc": "1",
 });
 const DEFAULT_CONSENT_INTEGRATIONS = Object.freeze({
   All: false,
@@ -47,7 +41,6 @@ const DEFAULT_CONSENT_INTEGRATIONS = Object.freeze({
 export function resolveOnaiRequestHeaders(): ResolvedOnaiRequestHeaders {
   return {
     userAgent: DEFAULT_BROWSER_USER_AGENT,
-    acceptLanguage: DEFAULT_ACCEPT_LANGUAGE,
     trackingContext: {},
     consentIntegrations: { ...DEFAULT_CONSENT_INTEGRATIONS },
     browserHeaders: { ...DEFAULT_BROWSER_HEADERS },
@@ -66,6 +59,7 @@ export function buildTrackingContextHeaders(
       ...requestHeaders.trackingContext,
       workspaceId,
       g_workspace_id: workspaceId,
+      fbp: "fb.1.1775284887196.738488026136559361",
     }),
     "x-consent-integrations": JSON.stringify(requestHeaders.consentIntegrations),
   };
@@ -77,12 +71,11 @@ export function buildStandardRequestHeaders(
 ): Record<string, string> {
   return {
     ...baseHeaders,
-    "accept-language": requestHeaders.acceptLanguage,
-    "user-agent": requestHeaders.userAgent,
+    "User-Agent": requestHeaders.userAgent,
     ...requestHeaders.browserHeaders,
   };
 }
 
 function defaultTrackingUrl(webOrigin: string): string {
-  return `${webOrigin.replace(/\/+$/, "")}/generate-image`;
+  return `${webOrigin.replace(/\/+$/, "")}/cloey-santos`;
 }
