@@ -28,7 +28,23 @@ The SDK must never run in browser code because it handles refresh tokens. Every 
 
 ## Install
 
-This package is in local development.
+The current release path is GitHub-first. Install the SDK from a GitHub repository in a backend project:
+
+```bash
+npm install github:mxhiraz/onai-sdk
+```
+
+Or install from a full Git URL:
+
+```bash
+npm install git+https://github.com/mxhiraz/onai-sdk.git
+```
+
+For a private repository, make sure the consuming server or CI environment has GitHub access through SSH keys, a GitHub token, or the platform's package install credentials.
+
+The package includes a `prepare` script, so GitHub installs build `dist` automatically before the SDK is packed for the consuming project.
+
+For local SDK development:
 
 ```bash
 npm install
@@ -36,6 +52,63 @@ npm run build
 ```
 
 Use it from server-side code only. The SDK stores a refresh token and exchanges it for a Firebase bearer token before calling Santos.
+
+## GitHub Release Flow
+
+Only release from a clean, reviewed SDK folder. Bump the version before every new tagged release so downstream apps can pin a stable ref.
+
+Preflight:
+
+```bash
+npm install
+npm run build
+npm --cache ./.npm-cache pack --dry-run
+```
+
+Before pushing, scan the public surface:
+
+```bash
+rg -n 'SDK_OFFERINGS|onai\.videos|GenerateVideoInput|\bVideosResource\b|from ".*\.ts"|export .* from ".*\.ts"' README.md src dist package.json tsconfig.json
+```
+
+Expected result: no matches. Also run the private provider-branding scan before release, but do not commit legacy provider names into public docs.
+
+First GitHub push:
+
+```bash
+git init
+git add .
+git commit -m "Release onai-sdk"
+git branch -M main
+git remote add origin <github-repo-url>
+git push -u origin main
+```
+
+Ongoing GitHub pushes:
+
+```bash
+git status --short
+git add .
+git commit -m "Release onai-sdk"
+git push
+```
+
+Optional version tag:
+
+```bash
+git tag v0.1.0
+git push origin v0.1.0
+```
+
+Downstream apps can install a branch, tag, or commit:
+
+```bash
+npm install github:mxhiraz/onai-sdk#main
+npm install github:mxhiraz/onai-sdk#v0.1.0
+npm install git+https://github.com/mxhiraz/onai-sdk.git#<commit-sha>
+```
+
+Never commit `.env`, refresh tokens, signed upload URLs, generated npm cache files, or private account data.
 
 ## Quick Start
 
