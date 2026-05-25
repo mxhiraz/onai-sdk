@@ -95,23 +95,19 @@ async function handleApiRequest(path, onai, body) {
       return onai.uploads.fromSignedUrl(requiredString(body.signedUrl, "signedUrl"));
 
     case "/api/uploads/upload":
-      return onai.uploads.uploadToSignedUrl({
-        signedUrl: requiredString(body.signedUrl, "signedUrl"),
-        contentType: requiredString(body.contentType, "contentType"),
-        body: decodeBase64Body(requiredString(body.bodyBase64, "bodyBase64")),
-      });
+      return onai.uploads.uploadImage(uploadInputFromBody(body));
 
     case "/api/products/create":
       return onai.products.create({
         name: requiredString(body.name, "name"),
-        image: requiredObject(body.image, "image"),
+        image: imageInputFromBody(body),
         skipTraining: body.skipTraining ?? true,
       });
 
     case "/api/characters/create":
       return onai.characters.create({
         name: requiredString(body.name, "name"),
-        image: requiredObject(body.image, "image"),
+        image: imageInputFromBody(body),
         skipTraining: body.skipTraining ?? true,
       });
 
@@ -202,6 +198,22 @@ async function readJsonBody(request) {
 function decodeBase64Body(value) {
   const base64 = value.includes(",") ? value.slice(value.indexOf(",") + 1) : value;
   return Buffer.from(base64, "base64");
+}
+
+function imageInputFromBody(body) {
+  if (body.image) {
+    return requiredObject(body.image, "image");
+  }
+
+  return uploadInputFromBody(requiredObject(body.upload, "upload"));
+}
+
+function uploadInputFromBody(value) {
+  return {
+    fileName: requiredString(value.fileName, "fileName"),
+    contentType: requiredString(value.contentType, "contentType"),
+    body: decodeBase64Body(requiredString(value.bodyBase64, "bodyBase64")),
+  };
 }
 
 function requiredString(value, field) {

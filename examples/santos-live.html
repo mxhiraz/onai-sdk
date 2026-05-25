@@ -356,13 +356,8 @@
 
           <section class="section stack">
             <h2>Upload And Create</h2>
-            <label>
-              Signed upload URL
-              <textarea id="signedUrl" spellcheck="false"></textarea>
-            </label>
             <input id="uploadFile" type="file" accept="image/*" />
             <div class="row">
-              <button data-action="parseSignedUrl">Parse Signed URL</button>
               <button data-action="uploadImage">Upload Image</button>
             </div>
             <label>
@@ -431,29 +426,18 @@
           renderAndWrite("Character Search", await api("/api/characters", { search: $("search").value })),
         searchProducts: async () =>
           renderAndWrite("Product Search", await api("/api/products", { search: $("search").value })),
-        parseSignedUrl: async () => {
-          state.uploadedImage = await api("/api/uploads/from-signed-url", { signedUrl: $("signedUrl").value });
-          writeOutput("Parsed Upload Reference", state.uploadedImage);
-        },
         uploadImage: async () => {
-          const file = $("uploadFile").files[0];
-          if (!file) throw new Error("Choose an image file first.");
-
-          state.uploadedImage = await api("/api/uploads/upload", {
-            signedUrl: $("signedUrl").value,
-            contentType: file.type || "image/jpeg",
-            bodyBase64: await readFileAsDataUrl(file),
-          });
+          state.uploadedImage = await api("/api/uploads/upload", await uploadPayloadFromSelectedFile());
           writeOutput("Uploaded Image", state.uploadedImage);
         },
         createProduct: async () => {
-          const image = requireUploadedImage();
-          const model = await api("/api/products/create", { name: $("modelName").value, image });
+          const imagePayload = await imagePayloadForCreate();
+          const model = await api("/api/products/create", { name: $("modelName").value, ...imagePayload });
           renderAndWrite("Created Product", [model]);
         },
         createCharacter: async () => {
-          const image = requireUploadedImage();
-          const model = await api("/api/characters/create", { name: $("modelName").value, image });
+          const imagePayload = await imagePayloadForCreate();
+          const model = await api("/api/characters/create", { name: $("modelName").value, ...imagePayload });
           renderAndWrite("Created Character", [model]);
         },
         generateImage: async () => {
@@ -588,12 +572,36 @@
         $("output").textContent = `${title}\n${JSON.stringify(data, null, 2)}`;
       }
 
-      function requireUploadedImage() {
-        if (!state.uploadedImage) {
-          throw new Error("Parse or upload an image first.");
+      async function imagePayloadForCreate() {
+        const file = $("uploadFile").files[0];
+
+        if (file) {
+          return {
+            upload: await uploadPayloadFromSelectedFile(),
+          };
         }
 
-        return state.uploadedImage;
+        if (state.uploadedImage) {
+          return {
+            image: state.uploadedImage,
+          };
+        }
+
+        throw new Error("Choose an image file or upload an image first.");
+      }
+
+      async function uploadPayloadFromSelectedFile() {
+        const file = $("uploadFile").files[0];
+
+        if (!file) {
+          throw new Error("Choose an image file first.");
+        }
+
+        return {
+          fileName: file.name || "image.jpg",
+          contentType: file.type || "image/jpeg",
+          bodyBase64: await readFileAsDataUrl(file),
+        };
       }
 
       function readFileAsDataUrl(file) {

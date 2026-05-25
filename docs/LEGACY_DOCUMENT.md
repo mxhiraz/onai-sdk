@@ -31,7 +31,7 @@ The SDK must never run in browser code because it handles refresh tokens. Every 
 The current release path is GitHub. Install a pinned release tag in backend projects:
 
 ```bash
-npm install github:mxhiraz/onai-sdk#v0.1.5
+npm install github:mxhiraz/onai-sdk#v0.1.6
 ```
 
 In `package.json`:
@@ -39,7 +39,7 @@ In `package.json`:
 ```json
 {
   "dependencies": {
-    "onai-sdk": "github:mxhiraz/onai-sdk#v0.1.5"
+    "onai-sdk": "github:mxhiraz/onai-sdk#v0.1.6"
   }
 }
 ```
@@ -47,7 +47,7 @@ In `package.json`:
 You can also install from the HTTPS Git URL:
 
 ```bash
-npm install git+https://github.com/mxhiraz/onai-sdk.git#v0.1.5
+npm install git+https://github.com/mxhiraz/onai-sdk.git#v0.1.6
 ```
 
 The package includes a `prepare` script, so GitHub installs build `dist` automatically before the SDK is packed for the consuming project.
@@ -104,7 +104,7 @@ The sample page can test:
 - `onai.models.list()` for inspecting all models
 - `onai.products.search()` and `onai.products.create()`
 - `onai.characters.search()` and `onai.characters.create()`
-- `onai.uploads.fromSignedUrl()` and `onai.uploads.uploadToSignedUrl()`
+- `onai.uploads.uploadImage()`, `onai.uploads.fromSignedUrl()`, and `onai.uploads.uploadToSignedUrl()`
 - `onai.images.list()` and `onai.images.generate()`
 - `onai.beta.videos.list()` and `onai.beta.videos.generate()`
 
@@ -132,7 +132,7 @@ npm run build
 Before pushing, scan the public surface:
 
 ```bash
-rg -n 'SDK_OFFERINGS|onai\.videos|GenerateVideoInput|\bVideosResource\b|from ".*\.ts"|export .* from ".*\.ts"' README.md src dist package.json tsconfig.json
+rg -n 'SDK[_]OFFERINGS|onai[.]videos|GenerateVideoInput|\bVideosResource\b|from ".*[.]ts"|export .* from ".*[.]ts"' README.md src dist package.json tsconfig.json
 ```
 
 Expected result: no matches. Also run the private provider-branding scan before release, but do not commit legacy provider names into public docs.
@@ -160,15 +160,15 @@ git push
 Optional version tag:
 
 ```bash
-git tag v0.1.5
-git push origin v0.1.5
+git tag v0.1.6
+git push origin v0.1.6
 ```
 
 Downstream apps can install a branch, tag, or commit:
 
 ```bash
 npm install github:mxhiraz/onai-sdk#main
-npm install github:mxhiraz/onai-sdk#v0.1.5
+npm install github:mxhiraz/onai-sdk#v0.1.6
 npm install git+https://github.com/mxhiraz/onai-sdk.git#<commit-sha>
 ```
 
@@ -232,7 +232,7 @@ The stable modules are:
 
 | Module | Stability | Responsibility |
 |---|---:|---|
-| `onai.uploads` | Stable | Upload bytes to signed URLs and parse uploaded image references. |
+| `onai.uploads` | Stable | Create upload URLs, upload source-image bytes, and parse uploaded image references. |
 | `onai.products` | Stable | Create, list, and search product models. |
 | `onai.characters` | Stable | Create, list, and search character models. |
 | `onai.models` | Stable | List products and characters together for inspection. |
@@ -327,7 +327,42 @@ These examples are the canonical integration path. Keep them current whenever th
 
 ### Upload Source Image
 
-Use `uploadToSignedUrl()` when the backend has image bytes and a signed upload URL.
+Use `uploadImage()` when the backend has image bytes. The SDK asks Santos for a signed upload URL, uploads the bytes with the required upload headers, and returns the image reference that product and character creation need.
+
+```ts
+const uploadedImage = await onai.uploads.uploadImage({
+  fileName: "tss-top.jpg",
+  contentType: "image/jpeg",
+  body: imageBytes,
+});
+
+console.log(uploadedImage.filePath);
+console.log(uploadedImage.id);
+```
+
+Product and character creation can also upload directly in one call:
+
+```ts
+const product = await onai.products.create({
+  name: "tss top",
+  image: {
+    fileName: "tss-top.jpg",
+    contentType: "image/jpeg",
+    body: imageBytes,
+  },
+});
+
+const character = await onai.characters.create({
+  name: "tom",
+  image: {
+    fileName: "tom.jpg",
+    contentType: "image/jpeg",
+    body: characterImageBytes,
+  },
+});
+```
+
+Use `uploadToSignedUrl()` only when a backend already has its own signed upload URL.
 
 ```ts
 const uploadedImage = await onai.uploads.uploadToSignedUrl({
@@ -363,6 +398,8 @@ console.log(product.status);
 
 Products map to Santos custom models with `modelType: "OBJECT"`.
 
+`image` can be either an uploaded image reference from `onai.uploads.uploadImage()` or a direct upload payload with `fileName`, `contentType`, and `body`.
+
 ### Create Character Model
 
 ```ts
@@ -377,6 +414,8 @@ console.log(character.status);
 ```
 
 Characters map to Santos custom models with `modelType: "CHARACTER"`.
+
+`image` can be either an uploaded image reference from `onai.uploads.uploadImage()` or a direct upload payload with `fileName`, `contentType`, and `body`.
 
 ### List Models And Search Typed Models
 
@@ -630,7 +669,7 @@ Use this prompt when asking an AI coding assistant to integrate or update the SD
 ```text
 You are integrating the OnAI server-side TypeScript SDK. Keep the SDK server-only. Load refreshToken, firebaseApiKey, and workspaceId from server-side configuration or the app database for each connected account. Do not expose credentials to browser code.
 
-Use onai.uploads for signed URL uploads, onai.products for product models, onai.characters for character models, onai.models only for listing all models, onai.images for stable image generation, and onai.beta.videos only for beta video generation. After creating a generation, call waitFor(id) to fetch the READY generation and read originalImageUrl/originalImageUrls. Keep video behind beta controls. Use exported enums instead of raw strings where possible.
+Use onai.uploads for source-image uploads, onai.products for product models, onai.characters for character models, onai.models only for listing all models, onai.images for stable image generation, and onai.beta.videos only for beta video generation. Product and character creation can accept either an uploaded image reference or a direct upload payload with fileName, contentType, and body. After creating a generation, call waitFor(id) to fetch the READY generation and read originalImageUrl/originalImageUrls. Keep video behind beta controls. Use exported enums instead of raw strings where possible.
 
 Preserve Santos branding in public docs and user-facing errors. Do not expose raw upstream errors. After changes, run npm run build and scan for stale stable video references, non-Santos branding, and .ts import endings.
 ```

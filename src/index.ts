@@ -41,8 +41,10 @@ export type {
 } from "./internal/custom-models.js";
 export type {
   CharacterImageInput,
+  CharacterCreateImageInput,
   CharacterModel,
   CharacterModelType,
+  CharacterUploadImageInput,
   CreateCharacterInput,
   ListCharactersInput,
 } from "./resources/characters.js";
@@ -74,12 +76,24 @@ export type { AiModel, ListModelsInput } from "./resources/models.js";
 export type {
   CreateProductInput,
   ListProductsInput,
+  ProductCreateImageInput,
   ProductImageInput,
   ProductModel,
   ProductModelType,
+  ProductUploadImageInput,
 } from "./resources/products.js";
 export type { RawGraphqlRequest } from "./resources/raw.js";
-export type { UploadedImage, UploadToSignedUrlInput } from "./resources/uploads.js";
+export type {
+  CreateWorkspaceAssetUploadUrlInput,
+  CreateWorkspaceAssetUploadUrlsInput,
+  UploadedImage,
+  UploadImageInput,
+  UploadImagesInput,
+  UploadToSignedUrlInput,
+  WorkspaceAssetUploadPrivacy,
+  WorkspaceAssetUploadResourceType,
+  WorkspaceAssetUploadUrl,
+} from "./resources/uploads.js";
 
 export interface OnaiClient {
   images: ImagesResource;
@@ -124,6 +138,11 @@ export function createOnaiClient(config: OnaiClientConfig): OnaiClient {
     graphql,
     workspaceId: resolvedConfig.workspaceId,
   });
+  const uploads = new UploadsResource({
+    graphql,
+    fetch: resolvedConfig.fetch,
+    workspaceId: resolvedConfig.workspaceId,
+  });
 
   return {
     images,
@@ -139,16 +158,13 @@ export function createOnaiClient(config: OnaiClientConfig): OnaiClient {
     }),
     products: new ProductsResource({
       customModels,
+      uploads,
     }),
     characters: new CharactersResource({
       customModels,
+      uploads,
     }),
-    uploads: new UploadsResource({
-      fetch: resolvedConfig.fetch,
-      origin: resolvedConfig.origin,
-      referer: resolvedConfig.referer,
-      headers: resolvedConfig.headers,
-    }),
+    uploads,
     raw: new RawResource(graphql),
   };
 }
