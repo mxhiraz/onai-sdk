@@ -20,6 +20,7 @@ import { RawResource } from "./resources/raw.js";
 import { UploadsResource } from "./resources/uploads.js";
 
 export { OnaiSdkError, OnaiAuthError, OnaiApiError, OnaiValidationError } from "./internal/errors.js";
+export type { OnaiLogger, OnaiLoggerConfig, OnaiLogLevel, OnaiLogMethod } from "./internal/logger.js";
 export {
   ImageGenerationAspectRatio,
   ImageGenerationMode,
@@ -119,6 +120,7 @@ export function createOnaiClient(config: OnaiClientConfig): OnaiClient {
     firebaseApiKey: resolvedConfig.firebaseApiKey,
     firebaseRefreshTokenEndpoint: resolvedConfig.firebaseRefreshTokenEndpoint,
     fetch: resolvedConfig.fetch,
+    logger: resolvedConfig.logger.child({ component: "auth" }),
   });
 
   const graphql = new SantosGraphqlClient({
@@ -129,19 +131,23 @@ export function createOnaiClient(config: OnaiClientConfig): OnaiClient {
     origin: resolvedConfig.origin,
     referer: resolvedConfig.referer,
     headers: resolvedConfig.headers,
+    logger: resolvedConfig.logger.child({ component: "graphql" }),
   });
   const customModels = new CustomModelsResource({
     graphql,
     workspaceId: resolvedConfig.workspaceId,
+    logger: resolvedConfig.logger.child({ component: "custom-models" }),
   });
   const images = new ImagesResource({
     graphql,
     workspaceId: resolvedConfig.workspaceId,
+    logger: resolvedConfig.logger.child({ component: "images" }),
   });
   const uploads = new UploadsResource({
     graphql,
     fetch: resolvedConfig.fetch,
     workspaceId: resolvedConfig.workspaceId,
+    logger: resolvedConfig.logger.child({ component: "uploads" }),
   });
 
   return {
@@ -151,6 +157,7 @@ export function createOnaiClient(config: OnaiClientConfig): OnaiClient {
       videos: new BetaVideosResource({
         graphql,
         workspaceId: resolvedConfig.workspaceId,
+        logger: resolvedConfig.logger.child({ component: "beta-videos" }),
       }),
     },
     models: new ModelsResource({

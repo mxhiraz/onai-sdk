@@ -1,4 +1,5 @@
 import { OnaiApiError } from "./errors.js";
+import { sanitizeForLog, type ResolvedOnaiLogger } from "./logger.js";
 import {
   buildStandardRequestHeaders,
   buildTrackingContextHeaders,
@@ -17,6 +18,7 @@ interface SantosGraphqlClientConfig {
   origin: string;
   referer: string;
   headers: ResolvedOnaiRequestHeaders;
+  logger: ResolvedOnaiLogger;
 }
 
 interface GraphqlRequest {
@@ -44,6 +46,7 @@ export class SantosGraphqlClient {
   private readonly origin: string;
   private readonly referer: string;
   private readonly headers: ResolvedOnaiRequestHeaders;
+  private readonly logger: ResolvedOnaiLogger;
 
   constructor(config: SantosGraphqlClientConfig) {
     this.endpoint = config.endpoint;
@@ -53,10 +56,28 @@ export class SantosGraphqlClient {
     this.origin = config.origin;
     this.referer = config.referer;
     this.headers = config.headers;
+    this.logger = config.logger;
   }
 
   async request<TData>(request: GraphqlRequest): Promise<TData> {
     const token = await this.tokenProvider.getToken();
+    const startedAt = Date.now();
+    this.logger.debug(
+      {
+        event: "graphql.request.start",
+        operationName: request.operationName,
+      },
+      "Santos GraphQL request started.",
+    );
+    this.logger.trace(
+      {
+        event: "graphql.request.variables",
+        operationName: request.operationName,
+        variables: sanitizeForLog(request.variables ?? {}),
+      },
+      "Santos GraphQL request variables.",
+    );
+
     const response = await this.fetch(this.endpoint, {
       method: "POST",
       headers: buildStandardRequestHeaders(this.headers, {
@@ -72,47 +93,96 @@ export class SantosGraphqlClient {
 
     const rawBody = await response.text();
     const payload = parseJson<GraphqlResponse<TData>>(rawBody);
+    const durationMs = Date.now() - startedAt;
 
     if (!response.ok) {
+      const details = buildGraphqlErrorDetails({
+        operationName: request.operationName,
+        response,
+        rawBody,
+        variables: request.variables,
+        errors: payload.errors,
+        reason: "http_error",
+      });
+      this.logger.error(
+        {
+          event: "graphql.request.error",
+          operationName: request.operationName,
+          status: response.status,
+          requestId: response.headers.get("x-request-id") ?? undefined,
+          durationMs,
+          details,
+        },
+        "Santos GraphQL request failed.",
+      );
       throw new OnaiApiError("Santos request failed.", {
         status: response.status,
-        details: buildGraphqlErrorDetails({
-          operationName: request.operationName,
-          response,
-          rawBody,
-          variables: request.variables,
-          errors: payload.errors,
-          reason: "http_error",
-        }),
+        details,
       });
     }
 
     if (payload.errors?.length) {
+      const details = buildGraphqlErrorDetails({
+        operationName: request.operationName,
+        response,
+        rawBody,
+        variables: request.variables,
+        errors: payload.errors,
+        reason: "graphql_error",
+      });
+      this.logger.error(
+        {
+          event: "graphql.request.error",
+          operationName: request.operationName,
+          status: response.status,
+          requestId: response.headers.get("x-request-id") ?? undefined,
+          durationMs,
+          details,
+        },
+        "Santos GraphQL returned errors.",
+      );
       throw new OnaiApiError("Santos returned an error.", {
         status: response.status,
-        details: buildGraphqlErrorDetails({
-          operationName: request.operationName,
-          response,
-          rawBody,
-          variables: request.variables,
-          errors: payload.errors,
-          reason: "graphql_error",
-        }),
+        details,
       });
     }
 
     if (!payload.data) {
+      const details = buildGraphqlErrorDetails({
+        operationName: request.operationName,
+        response,
+        rawBody,
+        variables: request.variables,
+        reason: "missing_data",
+      });
+      this.logger.error(
+        {
+          event: "graphql.request.error",
+          operationName: request.operationName,
+          status: response.status,
+          requestId: response.headers.get("x-request-id") ?? undefined,
+          durationMs,
+          details,
+        },
+        "Santos GraphQL response did not include data.",
+      );
       throw new OnaiApiError("Santos response did not include data.", {
         status: response.status,
-        details: buildGraphqlErrorDetails({
-          operationName: request.operationName,
-          response,
-          rawBody,
-          variables: request.variables,
-          reason: "missing_data",
-        }),
+        details,
       });
     }
+
+    this.logger.debug(
+      {
+        event: "graphql.request.success",
+        operationName: request.operationName,
+        status: response.status,
+        requestId: response.headers.get("x-request-id") ?? undefined,
+        rateLimitRemaining: response.headers.get("x-ratelimit-remaining") ?? undefined,
+        durationMs,
+      },
+      "Santos GraphQL request completed.",
+    );
 
     return payload.data;
   }

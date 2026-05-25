@@ -1,5 +1,6 @@
 import { OnaiApiError, OnaiValidationError } from "../internal/errors.js";
 import type { SantosGraphqlClient } from "../internal/graphql.js";
+import type { ResolvedOnaiLogger } from "../internal/logger.js";
 import type { CustomModelImageInput } from "../internal/custom-models.js";
 
 export type WorkspaceAssetUploadPrivacy = "PRIVATE" | "PUBLIC";
@@ -9,6 +10,7 @@ export interface UploadsResourceConfig {
   graphql: SantosGraphqlClient;
   fetch: typeof fetch;
   workspaceId: string;
+  logger: ResolvedOnaiLogger;
 }
 
 export interface UploadToSignedUrlInput {
@@ -79,20 +81,35 @@ export class UploadsResource {
   private readonly graphql: SantosGraphqlClient;
   private readonly fetch: typeof fetch;
   private readonly workspaceId: string;
+  private readonly logger: ResolvedOnaiLogger;
 
   constructor(config: UploadsResourceConfig) {
     this.graphql = config.graphql;
     this.fetch = config.fetch;
     this.workspaceId = config.workspaceId;
+    this.logger = config.logger;
   }
 
   async createSignedUrls(input: CreateWorkspaceAssetUploadUrlsInput): Promise<WorkspaceAssetUploadUrl[]> {
     const files = normalizeUploadFiles(input.files);
+    const workspaceId = requireNonEmpty(input.workspaceId ?? this.workspaceId, "workspaceId");
+    const startedAt = Date.now();
+    this.logger.debug(
+      {
+        event: "upload.urls_create.start",
+        workspaceId,
+        fileCount: files.length,
+        privacy: input.privacy ?? "PRIVATE",
+        resourceType: input.resourceType ?? "CUSTOM_MODEL_TRAINING_UPLOADS",
+      },
+      "Santos upload URL creation started.",
+    );
+
     const data = await this.graphql.request<WorkspaceAssetUploadUrlsCreateResponse>({
       operationName: "workspaceAssetUploadUrlsCreate",
       variables: {
         input: {
-          workspaceId: requireNonEmpty(input.workspaceId ?? this.workspaceId, "workspaceId"),
+          workspaceId,
           privacy: input.privacy ?? "PRIVATE",
           resourceType: input.resourceType ?? "CUSTOM_MODEL_TRAINING_UPLOADS",
           data: files.map(({ id, fileName, contentType }) => ({
@@ -108,6 +125,16 @@ export class UploadsResource {
     const uploadUrls = data.workspaceAssetUploadUrlsCreate;
 
     if (!Array.isArray(uploadUrls) || uploadUrls.length !== files.length) {
+      this.logger.error(
+        {
+          event: "upload.urls_create.missing",
+          workspaceId,
+          expected: files.length,
+          received: Array.isArray(uploadUrls) ? uploadUrls.length : 0,
+          durationMs: Date.now() - startedAt,
+        },
+        "Santos did not return expected upload URLs.",
+      );
       throw new OnaiApiError("Santos did not return upload URLs.", {
         details: {
           reason: "missing_upload_urls",
@@ -116,6 +143,16 @@ export class UploadsResource {
         },
       });
     }
+
+    this.logger.debug(
+      {
+        event: "upload.urls_create.success",
+        workspaceId,
+        fileCount: files.length,
+        durationMs: Date.now() - startedAt,
+      },
+      "Santos upload URL creation completed.",
+    );
 
     return uploadUrls;
   }
@@ -211,6 +248,14 @@ export class UploadsResource {
   }
 
   private async putSignedUpload(input: UploadToSignedUrlInput): Promise<void> {
+    this.logger.debug(
+      {
+        event: "upload.put.start",
+        contentType: input.contentType,
+      },
+      "Santos image upload started.",
+    );
+
     const response = await this.fetch(requireNonEmpty(input.signedUrl, "signedUrl"), {
       method: "PUT",
       headers: {
@@ -222,18 +267,35 @@ export class UploadsResource {
 
     if (!response.ok) {
       const responseBody = await response.text().catch(() => "");
+      const details = {
+        reason: "upload_failed",
+        status: response.status,
+        statusText: response.statusText,
+        responseHeaders: pickUploadDebugResponseHeaders(response.headers),
+        responseBodyPreview: previewBody(responseBody),
+      };
+      this.logger.error(
+        {
+          event: "upload.put.error",
+          status: response.status,
+          details,
+        },
+        "Santos image upload failed.",
+      );
 
       throw new OnaiApiError("Image upload failed.", {
         status: response.status,
-        details: {
-          reason: "upload_failed",
-          status: response.status,
-          statusText: response.statusText,
-          responseHeaders: pickUploadDebugResponseHeaders(response.headers),
-          responseBodyPreview: previewBody(responseBody),
-        },
+        details,
       });
     }
+
+    this.logger.debug(
+      {
+        event: "upload.put.success",
+        status: response.status,
+      },
+      "Santos image upload completed.",
+    );
   }
 }
 

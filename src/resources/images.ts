@@ -1,6 +1,7 @@
 import type { CustomModel, CustomModelType } from "../internal/custom-models.js";
 import { OnaiApiError, OnaiValidationError } from "../internal/errors.js";
 import type { SantosGraphqlClient } from "../internal/graphql.js";
+import type { ResolvedOnaiLogger } from "../internal/logger.js";
 
 export type ImageGenerationAssetType = "IMAGE" | "VIDEO";
 export enum ImageGenerationMode {
@@ -279,6 +280,7 @@ export interface ImageGenerationUser {
 interface ImagesResourceConfig {
   graphql: SantosGraphqlClient;
   workspaceId: string;
+  logger: ResolvedOnaiLogger;
 }
 
 interface ImageGenerationCreateResponse {
@@ -295,6 +297,7 @@ interface UserFreeImageCooldownStatusResponse {
 
 interface CreateGenerationRequest {
   graphql: SantosGraphqlClient;
+  logger: ResolvedOnaiLogger;
   defaultWorkspaceId: string;
   input: GenerateImageInput | GenerateBetaVideoInput;
   assetType: ImageGenerationAssetType;
@@ -306,15 +309,18 @@ interface CreateGenerationRequest {
 export class ImagesResource {
   private readonly graphql: SantosGraphqlClient;
   private readonly workspaceId: string;
+  private readonly logger: ResolvedOnaiLogger;
 
   constructor(config: ImagesResourceConfig) {
     this.graphql = config.graphql;
     this.workspaceId = config.workspaceId;
+    this.logger = config.logger;
   }
 
   async generate(input: GenerateImageInput): Promise<ImageGeneration> {
     return createGeneration({
       graphql: this.graphql,
+      logger: this.logger,
       defaultWorkspaceId: this.workspaceId,
       input,
       assetType: "IMAGE",
@@ -330,6 +336,7 @@ export class ImagesResource {
   async list(input: ListImageGenerationsInput = {}): Promise<ImageGeneration[]> {
     return listAllGenerations({
       graphql: this.graphql,
+      logger: this.logger,
       defaultWorkspaceId: this.workspaceId,
       input,
       forcedAssetType: "IMAGE",
@@ -339,6 +346,7 @@ export class ImagesResource {
   async listPage(input: ListImageGenerationsInput = {}): Promise<ImageGenerationsPage> {
     return listGenerationPage({
       graphql: this.graphql,
+      logger: this.logger,
       defaultWorkspaceId: this.workspaceId,
       input,
       forcedAssetType: "IMAGE",
@@ -348,6 +356,7 @@ export class ImagesResource {
   async get(id: string, input: GetImageGenerationInput = {}): Promise<ImageGeneration | null> {
     return getGeneration({
       graphql: this.graphql,
+      logger: this.logger,
       defaultWorkspaceId: this.workspaceId,
       id,
       input,
@@ -358,6 +367,7 @@ export class ImagesResource {
   async waitFor(id: string, input: WaitForImageGenerationInput = {}): Promise<ImageGeneration> {
     return waitForGeneration({
       graphql: this.graphql,
+      logger: this.logger,
       defaultWorkspaceId: this.workspaceId,
       id,
       input,
@@ -371,6 +381,13 @@ export class ImagesResource {
 
   async freeImageCooldownStatus(input: ImageCooldownStatusInput = {}): Promise<UserFreeImageCooldownStatus> {
     const workspaceId = requireNonEmpty(input.workspaceId ?? this.workspaceId, "workspaceId");
+    this.logger.debug(
+      {
+        event: "image.cooldown.start",
+        workspaceId,
+      },
+      "Santos image cooldown check started.",
+    );
 
     const data = await this.graphql.request<UserFreeImageCooldownStatusResponse>({
       operationName: "userFreeImageCooldownStatus",
@@ -379,6 +396,16 @@ export class ImagesResource {
       },
       query: USER_FREE_IMAGE_COOLDOWN_STATUS_QUERY,
     });
+
+    this.logger.debug(
+      {
+        event: "image.cooldown.success",
+        workspaceId,
+        isEligible: data.userFreeImageCooldownStatus.isEligible,
+        cooldownEndsAt: data.userFreeImageCooldownStatus.cooldownEndsAt,
+      },
+      "Santos image cooldown check completed.",
+    );
 
     return data.userFreeImageCooldownStatus;
   }
@@ -406,15 +433,18 @@ export class ImagesResource {
 export class BetaVideosResource {
   private readonly graphql: SantosGraphqlClient;
   private readonly workspaceId: string;
+  private readonly logger: ResolvedOnaiLogger;
 
   constructor(config: ImagesResourceConfig) {
     this.graphql = config.graphql;
     this.workspaceId = config.workspaceId;
+    this.logger = config.logger;
   }
 
   generate(input: GenerateBetaVideoInput): Promise<ImageGeneration> {
     return createGeneration({
       graphql: this.graphql,
+      logger: this.logger,
       defaultWorkspaceId: this.workspaceId,
       input,
       assetType: "VIDEO",
@@ -431,6 +461,7 @@ export class BetaVideosResource {
   async list(input: ListImageGenerationsInput = {}): Promise<ImageGeneration[]> {
     return listAllGenerations({
       graphql: this.graphql,
+      logger: this.logger,
       defaultWorkspaceId: this.workspaceId,
       input,
       forcedAssetType: "VIDEO",
@@ -440,6 +471,7 @@ export class BetaVideosResource {
   async listPage(input: ListImageGenerationsInput = {}): Promise<ImageGenerationsPage> {
     return listGenerationPage({
       graphql: this.graphql,
+      logger: this.logger,
       defaultWorkspaceId: this.workspaceId,
       input,
       forcedAssetType: "VIDEO",
@@ -449,6 +481,7 @@ export class BetaVideosResource {
   async get(id: string, input: GetImageGenerationInput = {}): Promise<ImageGeneration | null> {
     return getGeneration({
       graphql: this.graphql,
+      logger: this.logger,
       defaultWorkspaceId: this.workspaceId,
       id,
       input,
@@ -459,6 +492,7 @@ export class BetaVideosResource {
   async waitFor(id: string, input: WaitForImageGenerationInput = {}): Promise<ImageGeneration> {
     return waitForGeneration({
       graphql: this.graphql,
+      logger: this.logger,
       defaultWorkspaceId: this.workspaceId,
       id,
       input,
@@ -489,6 +523,19 @@ async function createGeneration(request: CreateGenerationRequest): Promise<Image
   const input = request.input;
   const workspaceId = requireNonEmpty(input.workspaceId ?? request.defaultWorkspaceId, "workspaceId");
   const customModelsConfig = input.customModelsConfig ?? input.models ?? [];
+  const startedAt = Date.now();
+  request.logger.info(
+    {
+      event: "generation.create.start",
+      workspaceId,
+      assetType: request.assetType,
+      aspectRatio: request.aspectRatio,
+      modelCount: customModelsConfig.length,
+      mode: input.mode ?? ImageGenerationMode.Default,
+      samples: request.samples ?? ImageGenerationVersion.Images1,
+    },
+    "Santos generation create started.",
+  );
 
   const data = await request.graphql.request<ImageGenerationCreateResponse>({
     operationName: "imageGenerationCreate",
@@ -513,11 +560,25 @@ async function createGeneration(request: CreateGenerationRequest): Promise<Image
     query: IMAGE_GENERATION_CREATE_MUTATION,
   });
 
-  return normalizeGenerationOutput(data.imageGenerationCreate);
+  const generation = normalizeGenerationOutput(data.imageGenerationCreate);
+  request.logger.info(
+    {
+      event: "generation.create.success",
+      workspaceId,
+      assetType: request.assetType,
+      generationId: generation.id,
+      status: generation.status,
+      durationMs: Date.now() - startedAt,
+    },
+    "Santos generation created.",
+  );
+
+  return generation;
 }
 
 interface GenerationLookupRequest<TInput extends GetImageGenerationInput | WaitForImageGenerationInput> {
   graphql: SantosGraphqlClient;
+  logger: ResolvedOnaiLogger;
   defaultWorkspaceId: string;
   id: string;
   input: TInput;
@@ -526,6 +587,7 @@ interface GenerationLookupRequest<TInput extends GetImageGenerationInput | WaitF
 
 interface ListGenerationsRequest {
   graphql: SantosGraphqlClient;
+  logger: ResolvedOnaiLogger;
   defaultWorkspaceId: string;
   input: ListImageGenerationsInput;
   forcedAssetType?: ImageGenerationAssetType | undefined;
@@ -534,6 +596,19 @@ interface ListGenerationsRequest {
 async function listGenerationPage(request: ListGenerationsRequest): Promise<ImageGenerationsPage> {
   const input = request.input;
   const workspaceId = requireNonEmpty(input.workspaceId ?? request.defaultWorkspaceId, "workspaceId");
+  const startedAt = Date.now();
+  request.logger.debug(
+    {
+      event: "generation.list_page.start",
+      workspaceId,
+      assetType: request.forcedAssetType ?? input.assetType,
+      limit: input.limit ?? 20,
+      hasCursor: Boolean(input.cursor),
+      id: input.id,
+      status: input.status,
+    },
+    "Santos generation page fetch started.",
+  );
 
   const data = await request.graphql.request<ImageGenerationsResponse>({
     operationName: "imageGenerations",
@@ -545,7 +620,20 @@ async function listGenerationPage(request: ListGenerationsRequest): Promise<Imag
     query: IMAGE_GENERATIONS_QUERY,
   });
 
-  return filterGenerationsPage(data.imageGenerations, input, request.forcedAssetType);
+  const page = filterGenerationsPage(data.imageGenerations, input, request.forcedAssetType);
+  request.logger.debug(
+    {
+      event: "generation.list_page.success",
+      workspaceId,
+      assetType: request.forcedAssetType ?? input.assetType,
+      count: page.imageGenerations.length,
+      hasNextCursor: Boolean(page.pageInfo.nextCursor),
+      durationMs: Date.now() - startedAt,
+    },
+    "Santos generation page fetch completed.",
+  );
+
+  return page;
 }
 
 async function listAllGenerations(request: ListGenerationsRequest): Promise<ImageGeneration[]> {
@@ -558,6 +646,14 @@ async function listAllGenerations(request: ListGenerationsRequest): Promise<Imag
 
   do {
     pageCount += 1;
+    request.logger.trace(
+      {
+        event: "generation.list.page_iteration",
+        pageCount,
+        hasCursor: Boolean(cursor),
+      },
+      "Santos generation list page iteration.",
+    );
     const pageInput: ListImageGenerationsInput = {
       ...input,
       cursor,
@@ -587,6 +683,7 @@ async function getGeneration(
 ): Promise<ImageGeneration | null> {
   const imageGenerations = await listAllGenerations({
     graphql: request.graphql,
+    logger: request.logger,
     defaultWorkspaceId: request.defaultWorkspaceId,
     input: generationLookupInput(request),
     forcedAssetType: request.forcedAssetType,
@@ -604,21 +701,60 @@ async function waitForGeneration(
   const timeoutMs = normalizePositiveNumber(request.input.timeoutMs ?? 180_000, "timeoutMs");
   const intervalMs = normalizePositiveNumber(request.input.intervalMs ?? 3_000, "intervalMs");
   const startedAt = Date.now();
+  request.logger.info(
+    {
+      event: "generation.wait.start",
+      generationId: id,
+      targetStatus,
+      timeoutMs,
+      intervalMs,
+      assetType: request.forcedAssetType,
+    },
+    "Santos generation wait started.",
+  );
 
   while (Date.now() - startedAt <= timeoutMs) {
     const generation = await getGeneration({
       graphql: request.graphql,
+      logger: request.logger,
       defaultWorkspaceId: request.defaultWorkspaceId,
       id,
       input: request.input,
       forcedAssetType: request.forcedAssetType,
     });
+    request.logger.trace(
+      {
+        event: "generation.wait.poll",
+        generationId: id,
+        status: generation?.status ?? null,
+        elapsedMs: Date.now() - startedAt,
+      },
+      "Santos generation wait poll completed.",
+    );
 
     if (generation?.status === targetStatus) {
+      request.logger.info(
+        {
+          event: "generation.wait.success",
+          generationId: id,
+          status: generation.status,
+          elapsedMs: Date.now() - startedAt,
+        },
+        "Santos generation wait completed.",
+      );
       return generation;
     }
 
     if (generation && terminalStatuses.has(generation.status)) {
+      request.logger.warn(
+        {
+          event: "generation.wait.terminal",
+          generationId: id,
+          status: generation.status,
+          elapsedMs: Date.now() - startedAt,
+        },
+        "Santos generation reached a terminal status.",
+      );
       throw new OnaiApiError("Generation did not complete.", {
         details: {
           generationId: id,
@@ -630,6 +766,14 @@ async function waitForGeneration(
     await sleep(intervalMs);
   }
 
+  request.logger.warn(
+    {
+      event: "generation.wait.timeout",
+      generationId: id,
+      timeoutMs,
+    },
+    "Santos generation wait timed out.",
+  );
   throw new OnaiApiError("Timed out waiting for generation.", {
     details: {
       generationId: id,

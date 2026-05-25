@@ -1,10 +1,12 @@
 import { OnaiAuthError, OnaiValidationError } from "./errors.js";
+import type { ResolvedOnaiLogger } from "./logger.js";
 
 interface FirebaseTokenProviderConfig {
   refreshToken: string;
   firebaseApiKey: string;
   firebaseRefreshTokenEndpoint: string;
   fetch: typeof fetch;
+  logger: ResolvedOnaiLogger;
 }
 
 interface FirebaseRefreshResponse {
@@ -22,6 +24,7 @@ export class FirebaseTokenProvider {
   private readonly firebaseApiKey: string;
   private readonly firebaseRefreshTokenEndpoint: string;
   private readonly fetch: typeof fetch;
+  private readonly logger: ResolvedOnaiLogger;
   private cachedToken: string | null = null;
   private expiresAt = 0;
 
@@ -33,10 +36,18 @@ export class FirebaseTokenProvider {
       "firebaseRefreshTokenEndpoint",
     );
     this.fetch = config.fetch;
+    this.logger = config.logger;
   }
 
   async getToken(): Promise<string> {
     if (this.cachedToken && Date.now() < this.expiresAt - 60_000) {
+      this.logger.trace(
+        {
+          event: "auth.token_cache.hit",
+          expiresAt: new Date(this.expiresAt).toISOString(),
+        },
+        "Santos auth token cache hit.",
+      );
       return this.cachedToken;
     }
 
@@ -44,6 +55,14 @@ export class FirebaseTokenProvider {
       grant_type: "refresh_token",
       refresh_token: this.refreshToken,
     });
+
+    const startedAt = Date.now();
+    this.logger.debug(
+      {
+        event: "auth.token_refresh.start",
+      },
+      "Santos auth token refresh started.",
+    );
 
     const response = await this.fetch(
       `${this.firebaseRefreshTokenEndpoint}?key=${encodeURIComponent(this.firebaseApiKey)}`,
@@ -57,8 +76,18 @@ export class FirebaseTokenProvider {
     );
 
     const payload = await readJson<FirebaseRefreshResponse>(response);
+    const durationMs = Date.now() - startedAt;
 
     if (!response.ok) {
+      this.logger.error(
+        {
+          event: "auth.token_refresh.error",
+          status: response.status,
+          durationMs,
+          reason: payload.error?.message ?? "token_refresh_failed",
+        },
+        "Santos auth token refresh failed.",
+      );
       throw new OnaiAuthError("Could not refresh authentication.", {
         status: response.status,
         details: {
@@ -70,6 +99,14 @@ export class FirebaseTokenProvider {
     const token = payload.id_token ?? payload.access_token;
 
     if (!token) {
+      this.logger.error(
+        {
+          event: "auth.token_refresh.missing_token",
+          status: response.status,
+          durationMs,
+        },
+        "Santos auth token refresh did not return a token.",
+      );
       throw new OnaiAuthError("Authentication response did not include a token.", {
         status: response.status,
         details: {
@@ -81,6 +118,15 @@ export class FirebaseTokenProvider {
     this.cachedToken = token;
     this.refreshToken = payload.refresh_token ?? this.refreshToken;
     this.expiresAt = Date.now() + parseExpiresIn(payload.expires_in);
+    this.logger.debug(
+      {
+        event: "auth.token_refresh.success",
+        status: response.status,
+        durationMs,
+        expiresAt: new Date(this.expiresAt).toISOString(),
+      },
+      "Santos auth token refresh completed.",
+    );
 
     return token;
   }

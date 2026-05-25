@@ -31,7 +31,7 @@ The SDK must never run in browser code because it handles refresh tokens. Every 
 The current release path is GitHub. Install a pinned release tag in backend projects:
 
 ```bash
-npm install github:mxhiraz/onai-sdk#v0.1.6
+npm install github:mxhiraz/onai-sdk#v0.1.7
 ```
 
 In `package.json`:
@@ -39,7 +39,7 @@ In `package.json`:
 ```json
 {
   "dependencies": {
-    "onai-sdk": "github:mxhiraz/onai-sdk#v0.1.6"
+    "onai-sdk": "github:mxhiraz/onai-sdk#v0.1.7"
   }
 }
 ```
@@ -47,7 +47,7 @@ In `package.json`:
 You can also install from the HTTPS Git URL:
 
 ```bash
-npm install git+https://github.com/mxhiraz/onai-sdk.git#v0.1.6
+npm install git+https://github.com/mxhiraz/onai-sdk.git#v0.1.7
 ```
 
 The package includes a `prepare` script, so GitHub installs build `dist` automatically before the SDK is packed for the consuming project.
@@ -160,15 +160,15 @@ git push
 Optional version tag:
 
 ```bash
-git tag v0.1.6
-git push origin v0.1.6
+git tag v0.1.7
+git push origin v0.1.7
 ```
 
 Downstream apps can install a branch, tag, or commit:
 
 ```bash
 npm install github:mxhiraz/onai-sdk#main
-npm install github:mxhiraz/onai-sdk#v0.1.6
+npm install github:mxhiraz/onai-sdk#v0.1.7
 npm install git+https://github.com/mxhiraz/onai-sdk.git#<commit-sha>
 ```
 
@@ -435,6 +435,58 @@ Recommended storage fields:
 | `revokedAt` | Optional | Mark disconnected accounts without deleting audit history. |
 
 Create the SDK client inside the request handler or background job after loading the account. Avoid a global singleton when each user has different credentials.
+
+## Logging
+
+The SDK supports structured logging for backend observability. Logging is disabled by default. Enable it only on the server.
+
+Use the built-in Pino logger:
+
+```ts
+const onai = createOnaiClient({
+  refreshToken: account.refreshToken,
+  firebaseApiKey: account.firebaseApiKey,
+  workspaceId: account.workspaceId,
+  logger: true,
+  logLevel: "debug",
+});
+```
+
+Or pass an existing Fastify/Pino-style logger:
+
+```ts
+const onai = createOnaiClient({
+  refreshToken: account.refreshToken,
+  firebaseApiKey: account.firebaseApiKey,
+  workspaceId: account.workspaceId,
+  logger: fastify.log.child({ sdk: "onai" }),
+});
+```
+
+Supported levels:
+
+```ts
+type OnaiLogLevel = "trace" | "debug" | "info" | "warn" | "error" | "silent";
+```
+
+What gets logged:
+
+| Area | Events |
+|---|---|
+| Auth | Token refresh start, cache hit, refresh success, refresh failure. |
+| GraphQL | Operation start, sanitized variables at `trace`, success, HTTP errors, GraphQL errors, request ID, rate-limit remaining, duration. |
+| Uploads | Upload URL creation, storage PUT start/success/failure. |
+| Models | Product/character custom-model create and list operations. |
+| Images | Cooldown checks, generation create, generation history pagination, wait/poll lifecycle. |
+| Beta videos | Same generation lifecycle as images, under the beta video component. |
+
+Log safety rules:
+
+- The SDK never logs bearer tokens, refresh tokens, Firebase API keys, request bodies, signed URLs, upload URLs, or authorization headers.
+- Custom logger methods should be Pino-compatible: `logger.info(object, message)`, `logger.warn(object, message)`, and so on.
+- SDK logging is best for backend debugging and telemetry. Do not expose structured debug logs directly to end users.
+- `trace` is intentionally noisy because it includes poll iterations and sanitized request variables. Use `debug` for normal development and `info` or `warn` in production.
+- Logging must never break SDK calls. If a user-provided logger throws, the SDK ignores that logger failure and continues the original SDK operation.
 
 ## Request Headers and User Context
 
@@ -741,6 +793,7 @@ The SDK is server-side only. Preserve these rules:
 - Return generated asset URLs and safe status fields to the browser, not raw API payloads.
 - Keep user-facing errors branded as Santos and avoid exposing raw upstream response bodies.
 - Treat `raw.graphqlRequest()` as privileged backend functionality.
+- Keep SDK logs server-side. Logs are sanitized, but they are still operational telemetry and should not be shown directly to users.
 
 ## Error Policy
 
@@ -803,6 +856,7 @@ Run this checklist whenever the SDK changes:
 - Keep package exports pointed at `dist`.
 - Keep `docs` included in `package.json` files.
 - Keep automatic request header behavior documented when config changes.
+- Keep logging behavior documented when logger events, log levels, or redaction rules change.
 - Do not pass `search` into Santos custom-model or generation-history GraphQL list operations unless the schema starts accepting it.
 - Run `npm run build`.
 - Scan for accidental non-Santos branding, `.ts` import endings, and stale stable video references.
@@ -822,7 +876,7 @@ Use this prompt when asking an AI coding assistant to integrate or update the SD
 ```text
 You are integrating the OnAI server-side TypeScript SDK. Keep the SDK server-only. Load refreshToken, firebaseApiKey, and workspaceId from server-side configuration or the app database for each connected account. Do not expose credentials to browser code.
 
-Use onai.uploads for source-image uploads, onai.products for product models, onai.characters for character models, onai.models only for listing all models, onai.images for stable image generation, and onai.beta.videos only for beta video generation. Product and character creation can accept either an uploaded image reference or a direct upload payload with fileName, contentType, and body. After creating a generation, call waitFor(id) to fetch the READY generation and read originalImageUrl/originalImageUrls. Keep video behind beta controls. Use exported enums instead of raw strings where possible.
+Use onai.uploads for source-image uploads, onai.products for product models, onai.characters for character models, onai.models only for listing all models, onai.images for stable image generation, and onai.beta.videos only for beta video generation. Product and character creation can accept either an uploaded image reference or a direct upload payload with fileName, contentType, and body. For backend observability, pass logger: true or a Fastify/Pino-style logger and choose logLevel. After creating a generation, call waitFor(id) to fetch the READY generation and read originalImageUrl/originalImageUrls. Keep video behind beta controls. Use exported enums instead of raw strings where possible.
 
 Preserve Santos branding in public docs and user-facing errors. Do not expose raw upstream errors. After changes, run npm run build and scan for stale stable video references, non-Santos branding, and .ts import endings.
 ```

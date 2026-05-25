@@ -1,6 +1,6 @@
 {
   "name": "onai-sdk",
-  "version": "0.1.6",
+  "version": "0.1.7",
   "description": "Server-side TypeScript SDK for image generation workflows.",
   "type": "module",
   "main": "./dist/index.js",
@@ -14,7 +14,7 @@
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "prepare": "npm run build",
-    "test": "npm run build",
+    "test": "npm run build && node --test tests/*.test.mjs",
     "sample:server": "npm run build && node examples/santos-live-server.mjs"
   },
   "engines": {
@@ -27,7 +27,11 @@
     "README.md"
   ],
   "devDependencies": {
+    "@types/node": "^25.9.1",
     "typescript": "^5.9.3"
   },
-  "license": "UNLICENSED"
+  "license": "UNLICENSED",
+  "dependencies": {
+    "pino": "^10.3.1"
+  }
 }

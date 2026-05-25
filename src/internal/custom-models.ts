@@ -1,5 +1,6 @@
 import { OnaiValidationError } from "./errors.js";
 import type { SantosGraphqlClient } from "./graphql.js";
+import type { ResolvedOnaiLogger } from "./logger.js";
 
 export type CustomModelType = "OBJECT" | "CHARACTER";
 
@@ -61,6 +62,7 @@ export interface CustomModel<TModelType extends CustomModelType = CustomModelTyp
 export interface CustomModelsResourceConfig {
   graphql: SantosGraphqlClient;
   workspaceId: string;
+  logger: ResolvedOnaiLogger;
 }
 
 interface CreateCustomModelResponse<TModelType extends CustomModelType> {
@@ -74,10 +76,12 @@ interface ListCustomModelsResponse {
 export class CustomModelsResource {
   private readonly graphql: SantosGraphqlClient;
   private readonly workspaceId: string;
+  private readonly logger: ResolvedOnaiLogger;
 
   constructor(config: CustomModelsResourceConfig) {
     this.graphql = config.graphql;
     this.workspaceId = config.workspaceId;
+    this.logger = config.logger;
   }
 
   async create<TModelType extends CustomModelType>(
@@ -86,6 +90,16 @@ export class CustomModelsResource {
   ): Promise<CustomModel<TModelType>> {
     const workspaceId = requireNonEmpty(input.workspaceId ?? this.workspaceId, "workspaceId");
     const sourceImages = normalizeSourceImages(input);
+    const startedAt = Date.now();
+    this.logger.debug(
+      {
+        event: "custom_model.create.start",
+        workspaceId,
+        modelType,
+        imageCount: sourceImages.length,
+      },
+      "Santos custom model create started.",
+    );
 
     const data = await this.graphql.request<CreateCustomModelResponse<TModelType>>({
       operationName: "imageGenerationCustomModelCreate",
@@ -101,6 +115,18 @@ export class CustomModelsResource {
       query: IMAGE_GENERATION_CUSTOM_MODEL_CREATE_MUTATION,
     });
 
+    this.logger.info(
+      {
+        event: "custom_model.create.success",
+        workspaceId,
+        modelType,
+        modelId: data.imageGenerationCustomModelCreate.id,
+        status: data.imageGenerationCustomModelCreate.status,
+        durationMs: Date.now() - startedAt,
+      },
+      "Santos custom model created.",
+    );
+
     return data.imageGenerationCustomModelCreate;
   }
 
@@ -110,6 +136,16 @@ export class CustomModelsResource {
   async list(input?: ListCustomModelsInput): Promise<CustomModel[]>;
   async list(input: ListCustomModelsInput = {}): Promise<CustomModel[]> {
     const workspaceId = requireNonEmpty(input.workspaceId ?? this.workspaceId, "workspaceId");
+    const startedAt = Date.now();
+    this.logger.debug(
+      {
+        event: "custom_model.list.start",
+        workspaceId,
+        modelType: input.type,
+        hasSearch: Boolean(input.search?.trim()),
+      },
+      "Santos custom model list started.",
+    );
 
     const data = await this.graphql.request<ListCustomModelsResponse>({
       operationName: "imageGenerationCustomModels",
@@ -119,7 +155,19 @@ export class CustomModelsResource {
       query: IMAGE_GENERATION_CUSTOM_MODELS_QUERY,
     });
 
-    return filterCustomModels(data.imageGenerationCustomModels, input);
+    const models = filterCustomModels(data.imageGenerationCustomModels, input);
+    this.logger.debug(
+      {
+        event: "custom_model.list.success",
+        workspaceId,
+        modelType: input.type,
+        count: models.length,
+        durationMs: Date.now() - startedAt,
+      },
+      "Santos custom model list completed.",
+    );
+
+    return models;
   }
 }
 
