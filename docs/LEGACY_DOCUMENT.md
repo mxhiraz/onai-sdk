@@ -26,21 +26,38 @@ The SDK is a server-only TypeScript client for Santos image-generation workflows
 
 The SDK must never run in browser code because it handles refresh tokens. Every integration must load user-specific credentials on the server, create a client for that user or job, call the required SDK methods, and return only safe results to the browser.
 
-## Install
+## Install From Private GitHub
 
-The current release path is GitHub-first. Install the SDK from a GitHub repository in a backend project:
-
-```bash
-npm install github:mxhiraz/onai-sdk
-```
-
-Or install from a full Git URL:
+The current release path is private GitHub. The recommended install method is SSH because it avoids putting access tokens in package files.
 
 ```bash
-npm install git+https://github.com/mxhiraz/onai-sdk.git
+npm install git+ssh://git@github.com/mxhiraz/onai-sdk.git#v0.1.0
 ```
 
-For a private repository, make sure the consuming server or CI environment has GitHub access through SSH keys, a GitHub token, or the platform's package install credentials.
+In `package.json`:
+
+```json
+{
+  "dependencies": {
+    "onai-sdk": "git+ssh://git@github.com/mxhiraz/onai-sdk.git#v0.1.0"
+  }
+}
+```
+
+The machine installing the SDK must have read access to `github.com/mxhiraz/onai-sdk`.
+
+For local development machines:
+
+```bash
+ssh -T git@github.com
+npm install git+ssh://git@github.com/mxhiraz/onai-sdk.git#v0.1.0
+```
+
+For CI or server deployments, use one of these:
+
+- Add a read-only deploy key to the private GitHub repository and load the private key in CI.
+- Use a GitHub machine user with read access and an SSH key.
+- Use an HTTPS GitHub token only through CI secrets or a local credential manager. Never commit tokens into `package.json`, `.npmrc`, `.env`, logs, or docs.
 
 The package includes a `prepare` script, so GitHub installs build `dist` automatically before the SDK is packed for the consuming project.
 
@@ -62,7 +79,6 @@ Preflight:
 ```bash
 npm install
 npm run build
-npm --cache ./.npm-cache pack --dry-run
 ```
 
 Before pushing, scan the public surface:
@@ -103,12 +119,12 @@ git push origin v0.1.0
 Downstream apps can install a branch, tag, or commit:
 
 ```bash
-npm install github:mxhiraz/onai-sdk#main
-npm install github:mxhiraz/onai-sdk#v0.1.0
-npm install git+https://github.com/mxhiraz/onai-sdk.git#<commit-sha>
+npm install git+ssh://git@github.com/mxhiraz/onai-sdk.git#main
+npm install git+ssh://git@github.com/mxhiraz/onai-sdk.git#v0.1.0
+npm install git+ssh://git@github.com/mxhiraz/onai-sdk.git#<commit-sha>
 ```
 
-Never commit `.env`, refresh tokens, signed upload URLs, generated npm cache files, or private account data.
+Never commit `.env`, refresh tokens, signed upload URLs, access tokens, generated cache folders, or private account data.
 
 ## Quick Start
 
