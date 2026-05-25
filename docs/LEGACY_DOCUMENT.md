@@ -243,6 +243,159 @@ The stable modules are:
 
 Do not expose beta video as a top-level stable video module until it is ready to become a stable contract.
 
+## Module Flow Diagrams
+
+The SDK is designed as a backend orchestration layer. The browser or mobile app should send user intent to your backend, and your backend should use the SDK to call Santos. This keeps credentials, upload URLs, and polling work off the user device.
+
+```mermaid
+flowchart LR
+  Device["Browser or mobile app"] -->|"HTTPS request with user action"| Backend["Your backend API"]
+  Backend -->|"Load encrypted account config"| DB["Your database"]
+  Backend -->|"Create per-user SDK client"| SDK["OnAI SDK"]
+  SDK -->|"Refresh token for bearer token"| Auth["Firebase token endpoint"]
+  SDK -->|"GraphQL requests"| Santos["Santos GraphQL"]
+  SDK -->|"PUT image bytes to signed URL"| Storage["Asset storage"]
+  Backend -->|"Safe response: ids, statuses, asset URLs"| Device
+```
+
+Do not import the SDK in frontend code. The SDK may hold refresh tokens, signed upload URLs, bearer tokens, and workspace IDs during a request.
+
+### Upload And Model Creation Flow
+
+Use this flow for `onai.uploads.uploadImage()`, `onai.products.create()`, and `onai.characters.create()`.
+
+```mermaid
+sequenceDiagram
+  participant Device as Browser or app
+  participant Backend as Your backend
+  participant SDK as OnAI SDK
+  participant GraphQL as Santos GraphQL
+  participant Storage as Asset storage
+
+  Device->>Backend: Submit file and model name
+  Backend->>SDK: products.create() or characters.create()
+  SDK->>GraphQL: workspaceAssetUploadUrlsCreate
+  GraphQL-->>SDK: uploadUrl, filePath, uploadHeaders
+  SDK->>Storage: PUT image bytes with returned headers
+  Storage-->>SDK: Upload accepted
+  SDK->>GraphQL: imageGenerationCustomModelCreate
+  GraphQL-->>SDK: Custom model
+  SDK-->>Backend: Product or character model
+  Backend-->>Device: Safe model fields
+```
+
+`products.create()` and `characters.create()` can accept either an existing uploaded image reference or a direct upload payload. When direct bytes are passed, the SDK handles upload URL creation and file upload before creating the model.
+
+### Generation Flow
+
+Use this flow for `onai.images.generate()` and `onai.beta.videos.generate()`.
+
+```mermaid
+sequenceDiagram
+  participant Device as Browser or app
+  participant Backend as Your backend
+  participant SDK as OnAI SDK
+  participant GraphQL as Santos GraphQL
+
+  Device->>Backend: Ask to generate image or beta video
+  Backend->>SDK: images.generate() or beta.videos.generate()
+  SDK->>GraphQL: imageGenerationCreate
+  GraphQL-->>SDK: Generation task with id and status
+  SDK-->>Backend: Generation task
+  Backend-->>Device: generationId, status
+```
+
+`generate()` starts work and returns quickly. It does not wait for output. Output URLs are usually empty until Santos marks the generation `READY`.
+
+### Wait And Polling Flow
+
+`waitFor(id)` polls Santos from the server process where the SDK is running. It does not run in the browser unless someone incorrectly imports the SDK into frontend code.
+
+Defaults:
+
+| Option | Default | Meaning |
+|---|---:|---|
+| `intervalMs` | `3000` | Wait 3 seconds between status checks. |
+| `timeoutMs` | `180000` | Stop waiting after 3 minutes. |
+| `targetStatus` | `READY` | Return when the generation reaches this status. |
+| `terminalStatuses` | `FAILED`, `ERROR`, `CANCELED`, `CANCELLED` | Throw if Santos returns one of these statuses. |
+
+```mermaid
+flowchart TD
+  Start["waitFor(generationId)"] --> Fetch["Fetch generation history"]
+  Fetch --> Found{"Found generation?"}
+  Found -->|"No"| Sleep["Sleep intervalMs"]
+  Found -->|"Yes"| Ready{"status is targetStatus?"}
+  Ready -->|"Yes"| Return["Return completed generation with originalImageUrl"]
+  Ready -->|"No"| Terminal{"status is terminal?"}
+  Terminal -->|"Yes"| Fail["Throw OnaiApiError"]
+  Terminal -->|"No"| Sleep
+  Sleep --> Timeout{"timeoutMs reached?"}
+  Timeout -->|"No"| Fetch
+  Timeout -->|"Yes"| TimedOut["Throw timeout error"]
+```
+
+Production recommendation:
+
+- For small internal tools, it is acceptable to call `await onai.images.waitFor(id)` inside a backend route if the host allows long requests.
+- For production web apps, return the generation ID immediately, store a job record, and poll from a backend worker or queue.
+- Let the browser poll your own lightweight status route, subscribe through SSE/WebSocket, or refresh from your database. Do not make the browser poll Santos directly.
+- Use a 3-5 second backend polling interval for normal images. Use a longer interval for beta video when the expected duration is higher.
+- Keep timeouts lower than your serverless function timeout. If your platform times out after 60 seconds, use a background worker instead of holding the HTTP request open.
+
+### Recommended Production Architecture
+
+```mermaid
+flowchart LR
+  Device["Browser or app"] -->|"POST /generate"| API["API route"]
+  API -->|"create generation"| SDK["OnAI SDK"]
+  SDK -->|"task id"| API
+  API -->|"store pending job"| DB["Database"]
+  API -->|"202 Accepted + generationId"| Device
+  Worker["Worker or queue"] -->|"poll wait/get"| SDK
+  Worker -->|"save READY output URLs or failure"| DB
+  Device -->|"GET /generation/:id"| API
+  API -->|"read cached status"| DB
+  API -->|"status + originalImageUrl when ready"| Device
+```
+
+This pattern minimizes device load and API load. The device makes cheap requests to your backend. The backend controls rate limits, timeouts, retries, and error handling. Santos credentials stay server-side.
+
+## Module Behavior And Edge Cases
+
+| Module | What It Does | Optimized Usage | Edge Cases |
+|---|---|---|---|
+| `onai.uploads` | Creates signed upload URLs, PUTs image bytes, returns `{ filePath, id }`. | Upload from the backend once, then reuse the returned image reference for create calls. | Upload URL may expire, `contentType` must match the file, storage PUT can fail, file bytes must not be empty. |
+| `onai.products` | Creates, lists, and searches product models. Products use `modelType: "OBJECT"`. | Pass direct image bytes to `products.create()` for simple flows, or pass an uploaded image reference if you already uploaded. | At least one image is required; duplicate model names may still create new models; model warnings may be returned for low-resolution or unclear product images. |
+| `onai.characters` | Creates, lists, and searches character models. Characters use `modelType: "CHARACTER"`. | Use one clear portrait/body reference when possible. Keep the returned model ID for prompt mentions. | Low-resolution faces may produce warnings; missing `imageOptions` can block generation config; character and product IDs must not be mixed in prompt config. |
+| `onai.models` | Lists all product and character models together. | Use for admin/debug screens. Use typed `products.search()` or `characters.search()` for app workflows. | Santos does not accept server-side `search` for custom models right now, so search is SDK-side after listing. Cache repeated reads if your app calls it often. |
+| `onai.images` | Generates images, reads history, polls status, checks cooldown, builds mentions and model configs. | Call `generate()` first, store the ID, then use a backend worker or bounded `waitFor()`. | Cooldown may block usage; `originalImageUrl` is `null` until READY; old generations may fall outside recent history; rate limits can apply. |
+| `onai.generations` | Stable alias of `onai.images`. | Use only when the word "generation" is clearer in app code. | Same behavior and edge cases as `onai.images`. |
+| `onai.beta.videos` | Beta video generation using the same generation task shape with `assetType: "VIDEO"`. | Keep behind feature flags and use worker polling. | Beta API may change; video waits may exceed normal HTTP timeouts; output may take longer than images. |
+| `onai.raw` | Sends a custom Santos GraphQL operation. | Use only for backend-only workflows not wrapped by the SDK yet. | You own the query shape, variables, pagination, and schema drift risk. Never expose raw GraphQL from public frontend routes. |
+
+## Load And Rate-Limit Guidelines
+
+Use these defaults unless your production telemetry says otherwise.
+
+| Workflow | Recommended Pattern | Why |
+|---|---|---|
+| Upload and create one model | Single backend request is fine. | It does one upload URL mutation, one storage PUT, and one model create mutation. |
+| Generate without waiting | Return the task immediately. | Lowest latency and no long-held HTTP connection. |
+| Generate and wait in a route | Only for internal tools or hosts with enough timeout. | Simple, but the HTTP connection stays open while backend polling happens. |
+| Production wait | Queue or worker polls with `intervalMs` around `3000-5000`. | Keeps browser/device work low and avoids serverless timeout problems. |
+| Status updates to browser | Browser polls your backend every `3000-5000ms`, or use SSE/WebSocket. | The browser never touches Santos credentials or rate limits directly. |
+| Lists/search screens | Cache model lists briefly per workspace. | Typed search is local after list; caching avoids repeated full-list calls. |
+| Generation history | Use `listPage()` for infinite scroll. | Cursor pagination avoids pulling too much history. |
+
+Avoid:
+
+- Calling `waitFor()` from browser code.
+- Running many `waitFor()` calls concurrently in one request.
+- Polling more often than every 2-3 seconds without a measured reason.
+- Calling `models.list()` on every keypress. Debounce search and cache workspace model lists.
+- Returning raw SDK error details to end users. Log debug details server-side and return friendly product errors.
+
 ## Configuration Model
 
 The SDK supports both single-account and multi-account applications.
