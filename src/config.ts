@@ -1,9 +1,5 @@
 import { OnaiValidationError } from "./internal/errors.js";
-import {
-  resolveOnaiRequestHeaders,
-  type OnaiRequestHeadersConfig,
-  type ResolvedOnaiRequestHeaders,
-} from "./internal/request-headers.js";
+import { resolveOnaiRequestHeaders, type ResolvedOnaiRequestHeaders } from "./internal/request-headers.js";
 import { resolveOnaiRuntimeUrls, type OnaiRuntimeUrlOverrides } from "./runtime-config.js";
 
 export interface OnaiClientConfig {
@@ -13,7 +9,6 @@ export interface OnaiClientConfig {
   urls?: OnaiRuntimeUrlOverrides | undefined;
   endpoint?: string | undefined;
   fetch?: typeof fetch | undefined;
-  headers?: OnaiRequestHeadersConfig | undefined;
   origin?: string | undefined;
   referer?: string | undefined;
 }
@@ -66,7 +61,7 @@ export function resolveOnaiConfig(config: OnaiClientConfig): ResolvedOnaiClientC
     origin: runtimeUrls.webOrigin,
     referer: runtimeUrls.webReferer,
     firebaseRefreshTokenEndpoint: runtimeUrls.firebaseRefreshTokenEndpoint,
-    headers: resolveOnaiRequestHeaders(config.headers),
+    headers: resolveOnaiRequestHeaders(),
   };
 }
 

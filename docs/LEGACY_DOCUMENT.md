@@ -31,7 +31,7 @@ The SDK must never run in browser code because it handles refresh tokens. Every 
 The current release path is GitHub. Install a pinned release tag in backend projects:
 
 ```bash
-npm install github:mxhiraz/onai-sdk#v0.1.0
+npm install github:mxhiraz/onai-sdk#v0.1.1
 ```
 
 In `package.json`:
@@ -39,7 +39,7 @@ In `package.json`:
 ```json
 {
   "dependencies": {
-    "onai-sdk": "github:mxhiraz/onai-sdk#v0.1.0"
+    "onai-sdk": "github:mxhiraz/onai-sdk#v0.1.1"
   }
 }
 ```
@@ -47,7 +47,7 @@ In `package.json`:
 You can also install from the HTTPS Git URL:
 
 ```bash
-npm install git+https://github.com/mxhiraz/onai-sdk.git#v0.1.0
+npm install git+https://github.com/mxhiraz/onai-sdk.git#v0.1.1
 ```
 
 The package includes a `prepare` script, so GitHub installs build `dist` automatically before the SDK is packed for the consuming project.
@@ -60,6 +60,61 @@ npm run build
 ```
 
 Use it from server-side code only. The SDK stores a refresh token and exchanges it for a Firebase bearer token before calling Santos.
+
+## Local Sample Server
+
+The repository includes a local sample server and HTML tester for manually exercising SDK modules.
+
+Run it locally:
+
+```bash
+npm run sample:server
+```
+
+Open:
+
+```text
+http://localhost:4317
+```
+
+The page lets you paste credentials into the browser for the current local session. The browser sends them only to the local sample server, and the sample server creates the SDK client with:
+
+```ts
+createOnaiClient({
+  refreshToken,
+  firebaseApiKey,
+  workspaceId,
+});
+```
+
+The sample server does not pass custom SDK headers, tracking context, or arbitrary request headers. The SDK sends its built-in Santos-compatible headers.
+
+Credentials used by the tester:
+
+| Variable | Source |
+|---|---|
+| Firebase API key | Firebase `apiKey` from the signed-in account payload. |
+| Refresh token | Firebase `stsTokenManager.refreshToken` from the signed-in account payload. |
+| Workspace ID | Santos workspace ID used by the account. |
+
+The sample page can test:
+
+- `onai.images.cooldownStatus()`
+- `onai.raw.graphqlRequest()`
+- `onai.models.list()` and model search
+- `onai.products.search()` and `onai.products.create()`
+- `onai.characters.search()` and `onai.characters.create()`
+- `onai.uploads.fromSignedUrl()` and `onai.uploads.uploadToSignedUrl()`
+- `onai.images.list()` and `onai.images.generate()`
+- `onai.beta.videos.list()` and `onai.beta.videos.generate()`
+
+The prompt builder uses Santos mention syntax:
+
+```text
+@[tom](ZMvUvujEqQM23Jz7XAra) with @[tss_top](7SdzfyBZ6aKcnvnLmWKy)
+```
+
+Never commit `.env`, refresh tokens, access tokens, signed upload URLs, or copied browser auth payloads.
 
 ## GitHub Release Flow
 
@@ -103,15 +158,15 @@ git push
 Optional version tag:
 
 ```bash
-git tag v0.1.0
-git push origin v0.1.0
+git tag v0.1.1
+git push origin v0.1.1
 ```
 
 Downstream apps can install a branch, tag, or commit:
 
 ```bash
 npm install github:mxhiraz/onai-sdk#main
-npm install github:mxhiraz/onai-sdk#v0.1.0
+npm install github:mxhiraz/onai-sdk#v0.1.1
 npm install git+https://github.com/mxhiraz/onai-sdk.git#<commit-sha>
 ```
 
@@ -238,43 +293,12 @@ By default the SDK sends:
 - Santos consent integrations.
 - Santos tracking context with `platform: "web"`, the configured workspace ID, and the configured generate route as `url`.
 
-Use the optional `headers` config only when your backend has more specific request context, such as the incoming user agent, language, URL, session ID, or consent values.
-
-```ts
-const onai = createOnaiClient({
-  refreshToken: account.refreshToken,
-  firebaseApiKey: account.firebaseApiKey,
-  workspaceId: account.workspaceId,
-  headers: {
-    userAgent: request.headers.get("user-agent") ?? undefined,
-    acceptLanguage: request.headers.get("accept-language") ?? undefined,
-    trackingContext: {
-      url: "https://your-app.example/generate",
-      userId,
-      sessionId,
-    },
-    consentIntegrations: {
-      All: false,
-      Intercom: true,
-      Mixpanel: true,
-    },
-    additionalHeaders: {
-      "x-request-source": "your-backend",
-    },
-  },
-});
-```
-
 Header rules:
 
-- `headers` is optional; the SDK sends Santos-compatible defaults automatically.
-- `userAgent` and `acceptLanguage` override the automatic defaults when provided.
-- `trackingContext` is merged into `x-tracking-context`; the SDK always controls `platform`, `workspaceId`, and `g_workspace_id`.
-- `trackingContext.url` can override the automatic web-origin URL.
-- `consentIntegrations` is merged with the automatic Santos consent defaults and serialized into `x-consent-integrations`.
-- `additionalHeaders` is only for safe custom server headers.
-- The SDK manages auth, content type, origin, referer, tracking, consent, and browser-style headers.
-- Set `headers.autoBrowserHeaders` to `false` only for tests or custom proxy environments.
+- The public SDK config does not accept custom request headers.
+- The SDK controls browser-style headers, auth, content type, origin, referer, tracking, and consent headers.
+- Santos tracking context is generated by the SDK with `platform: "web"`, the configured workspace ID, and the configured generate route as `url`.
+- Do not add app-specific tracking, test URLs, custom session IDs, or arbitrary request headers through the SDK.
 
 ## Runtime URLs
 
@@ -516,7 +540,7 @@ The SDK is server-side only. Preserve these rules:
 
 - Never import this SDK in frontend bundles.
 - Never expose refresh tokens, Firebase API keys, signed upload URLs, or workspace credentials to browser logs.
-- The SDK sends Santos-compatible browser-style headers automatically; only override request context when your backend has better real values.
+- The SDK sends Santos-compatible browser-style headers automatically and does not expose public custom header overrides.
 - Store refresh tokens encrypted at rest.
 - Create SDK clients per tenant when accounts differ.
 - Return generated asset URLs and safe status fields to the browser, not raw API payloads.

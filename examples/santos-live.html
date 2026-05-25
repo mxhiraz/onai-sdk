@@ -1,0 +1,620 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>OnAI SDK Live Tester</title>
+    <style>
+      :root {
+        color-scheme: dark;
+        font-family:
+          Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+        background: #101113;
+        color: #f3f4f6;
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      body {
+        margin: 0;
+        min-height: 100vh;
+        background: #101113;
+      }
+
+      main {
+        width: min(1440px, 100%);
+        margin: 0 auto;
+        padding: 24px;
+      }
+
+      h1,
+      h2 {
+        margin: 0;
+        font-weight: 650;
+        letter-spacing: 0;
+      }
+
+      h1 {
+        font-size: 28px;
+      }
+
+      h2 {
+        font-size: 17px;
+      }
+
+      label {
+        display: grid;
+        gap: 6px;
+        color: #cbd5e1;
+        font-size: 13px;
+      }
+
+      input,
+      select,
+      textarea,
+      button {
+        font: inherit;
+      }
+
+      input,
+      select,
+      textarea {
+        width: 100%;
+        border: 1px solid #30343b;
+        border-radius: 8px;
+        background: #17191d;
+        color: #f8fafc;
+        padding: 10px 11px;
+        outline: none;
+      }
+
+      textarea {
+        min-height: 96px;
+        resize: vertical;
+      }
+
+      button {
+        border: 1px solid #3b414c;
+        border-radius: 8px;
+        background: #22262d;
+        color: #f8fafc;
+        padding: 10px 12px;
+        cursor: pointer;
+      }
+
+      button.primary {
+        background: #f3f4f6;
+        color: #101113;
+        border-color: #f3f4f6;
+      }
+
+      button:disabled {
+        cursor: wait;
+        opacity: 0.7;
+      }
+
+      pre {
+        margin: 0;
+        white-space: pre-wrap;
+        word-break: break-word;
+        min-height: 220px;
+        max-height: 680px;
+        overflow: auto;
+        border: 1px solid #30343b;
+        border-radius: 8px;
+        background: #0b0c0f;
+        padding: 14px;
+        color: #dbeafe;
+        font-size: 12px;
+        line-height: 1.45;
+      }
+
+      .topbar {
+        display: flex;
+        justify-content: space-between;
+        gap: 16px;
+        align-items: center;
+        margin-bottom: 20px;
+      }
+
+      .layout {
+        display: grid;
+        grid-template-columns: minmax(320px, 440px) minmax(0, 1fr);
+        gap: 20px;
+      }
+
+      .section {
+        border-top: 1px solid #2a2f38;
+        padding: 18px 0;
+      }
+
+      .section:first-child {
+        border-top: 0;
+        padding-top: 0;
+      }
+
+      .grid {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 12px;
+      }
+
+      .stack {
+        display: grid;
+        gap: 12px;
+      }
+
+      .row {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 10px;
+        align-items: center;
+      }
+
+      .muted {
+        color: #94a3b8;
+        font-size: 13px;
+      }
+
+      .pill {
+        display: inline-flex;
+        align-items: center;
+        gap: 8px;
+        border: 1px solid #3b414c;
+        border-radius: 999px;
+        padding: 6px 10px;
+        background: #17191d;
+        color: #dbeafe;
+        font-size: 13px;
+      }
+
+      .results {
+        display: grid;
+        gap: 10px;
+      }
+
+      .item {
+        display: grid;
+        grid-template-columns: 56px minmax(0, 1fr) auto;
+        gap: 12px;
+        align-items: center;
+        border: 1px solid #30343b;
+        border-radius: 8px;
+        padding: 10px;
+        background: #15171b;
+      }
+
+      .thumb {
+        width: 56px;
+        height: 56px;
+        object-fit: cover;
+        border-radius: 6px;
+        background: #0b0c0f;
+      }
+
+      .mono {
+        font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
+      }
+
+      @media (max-width: 960px) {
+        main {
+          padding: 18px;
+        }
+
+        .layout,
+        .grid {
+          grid-template-columns: 1fr;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <div class="topbar">
+        <div>
+          <h1>OnAI SDK Live Tester</h1>
+          <div class="muted">Local server UI for exercising SDK modules without committing secrets.</div>
+        </div>
+        <button id="clearOutput">Clear Output</button>
+      </div>
+
+      <div class="layout">
+        <div>
+          <section class="section stack">
+            <h2>Credentials</h2>
+            <label>
+              Firebase API key
+              <input id="firebaseApiKey" autocomplete="off" spellcheck="false" />
+            </label>
+            <label>
+              Refresh token
+              <textarea id="refreshToken" autocomplete="off" spellcheck="false"></textarea>
+            </label>
+            <label>
+              Workspace ID
+              <input id="workspaceId" autocomplete="off" spellcheck="false" />
+            </label>
+          </section>
+
+          <section class="section stack">
+            <h2>Smoke Checks</h2>
+            <div class="row">
+              <button data-action="cooldown">Cooldown</button>
+              <button data-action="rawCooldown">Raw Cooldown</button>
+              <button data-action="models">All Models</button>
+              <button data-action="images">Recent Images</button>
+              <button data-action="videos">Recent Videos</button>
+            </div>
+            <label>
+              Search
+              <input id="search" value="tom" />
+            </label>
+            <div class="row">
+              <button data-action="searchModels">Search Models</button>
+              <button data-action="searchCharacters">Search Characters</button>
+              <button data-action="searchProducts">Search Products</button>
+            </div>
+          </section>
+
+          <section class="section stack">
+            <h2>Selected Models</h2>
+            <div id="selectedModels" class="row"></div>
+            <button id="buildPrompt">Build Prompt</button>
+            <label>
+              Prompt
+              <textarea id="prompt">@[tom](ZMvUvujEqQM23Jz7XAra) with @[tss_top](7SdzfyBZ6aKcnvnLmWKy)</textarea>
+            </label>
+            <div class="grid">
+              <label>
+                Image ratio
+                <select id="imageRatio">
+                  <option>4:5</option>
+                  <option>9:16</option>
+                  <option>2:3</option>
+                  <option>3:4</option>
+                  <option>1:1</option>
+                  <option>5:4</option>
+                  <option>4:3</option>
+                  <option>3:2</option>
+                  <option>16:9</option>
+                  <option>21:9</option>
+                </select>
+              </label>
+              <label>
+                Mode
+                <select id="mode">
+                  <option value="default">default</option>
+                  <option value="max">max</option>
+                  <option value="premium">premium</option>
+                </select>
+              </label>
+              <label>
+                Versions
+                <select id="samples">
+                  <option value="1">1 image</option>
+                  <option value="2">2 images</option>
+                  <option value="4">4 images</option>
+                </select>
+              </label>
+              <label>
+                Wait for result
+                <select id="waitImage">
+                  <option value="false">No</option>
+                  <option value="true">Yes</option>
+                </select>
+              </label>
+            </div>
+            <button class="primary" data-action="generateImage">Generate Image</button>
+          </section>
+
+          <section class="section stack">
+            <h2>Beta Video</h2>
+            <div class="grid">
+              <label>
+                Ratio
+                <select id="videoRatio">
+                  <option>16:9</option>
+                  <option>1:1</option>
+                  <option>9:16</option>
+                </select>
+              </label>
+              <label>
+                Time
+                <select id="videoDuration">
+                  <option value="4">4s</option>
+                  <option value="5" selected>5s</option>
+                  <option value="6">6s</option>
+                  <option value="7">7s</option>
+                  <option value="8">8s</option>
+                  <option value="9">9s</option>
+                  <option value="10">10s</option>
+                  <option value="11">11s</option>
+                  <option value="12">12s</option>
+                  <option value="13">13s</option>
+                  <option value="14">14s</option>
+                  <option value="15">15s</option>
+                </select>
+              </label>
+              <label>
+                Sound
+                <select id="videoSound">
+                  <option value="off">Off</option>
+                  <option value="on">On</option>
+                </select>
+              </label>
+              <label>
+                Wait for result
+                <select id="waitVideo">
+                  <option value="false">No</option>
+                  <option value="true">Yes</option>
+                </select>
+              </label>
+            </div>
+            <button data-action="generateVideo">Generate Beta Video</button>
+          </section>
+
+          <section class="section stack">
+            <h2>Upload And Create</h2>
+            <label>
+              Signed upload URL
+              <textarea id="signedUrl" spellcheck="false"></textarea>
+            </label>
+            <input id="uploadFile" type="file" accept="image/*" />
+            <div class="row">
+              <button data-action="parseSignedUrl">Parse Signed URL</button>
+              <button data-action="uploadImage">Upload Image</button>
+            </div>
+            <label>
+              Model name
+              <input id="modelName" value="test model" />
+            </label>
+            <div class="row">
+              <button data-action="createProduct">Create Product</button>
+              <button data-action="createCharacter">Create Character</button>
+            </div>
+          </section>
+        </div>
+
+        <div class="stack">
+          <section class="section stack">
+            <h2>Model Results</h2>
+            <div id="results" class="results"></div>
+          </section>
+          <section class="section stack">
+            <h2>Output</h2>
+            <pre id="output">{}</pre>
+          </section>
+        </div>
+      </div>
+    </main>
+
+    <script>
+      const state = {
+        selected: [],
+        uploadedImage: null,
+      };
+
+      const $ = (id) => document.getElementById(id);
+
+      $("clearOutput").addEventListener("click", () => {
+        $("output").textContent = "{}";
+      });
+
+      $("buildPrompt").addEventListener("click", () => {
+        $("prompt").value = buildPrompt();
+      });
+
+      document.addEventListener("click", async (event) => {
+        const action = event.target?.dataset?.action;
+        if (!action) return;
+
+        event.target.disabled = true;
+        try {
+          await actions[action]();
+        } catch (error) {
+          writeOutput("Error", {
+            message: error.message,
+          });
+        } finally {
+          event.target.disabled = false;
+        }
+      });
+
+      const actions = {
+        cooldown: async () => writeOutput("Cooldown", await api("/api/cooldown")),
+        rawCooldown: async () => writeOutput("Raw Cooldown", await api("/api/raw/cooldown")),
+        models: async () => renderAndWrite("All Models", await api("/api/models")),
+        images: async () => writeOutput("Recent Images", await api("/api/images", { limit: 12 })),
+        videos: async () => writeOutput("Recent Videos", await api("/api/videos", { limit: 12 })),
+        searchModels: async () => renderAndWrite("Model Search", await api("/api/models", { search: $("search").value })),
+        searchCharacters: async () =>
+          renderAndWrite("Character Search", await api("/api/characters", { search: $("search").value })),
+        searchProducts: async () =>
+          renderAndWrite("Product Search", await api("/api/products", { search: $("search").value })),
+        parseSignedUrl: async () => {
+          state.uploadedImage = await api("/api/uploads/from-signed-url", { signedUrl: $("signedUrl").value });
+          writeOutput("Parsed Upload Reference", state.uploadedImage);
+        },
+        uploadImage: async () => {
+          const file = $("uploadFile").files[0];
+          if (!file) throw new Error("Choose an image file first.");
+
+          state.uploadedImage = await api("/api/uploads/upload", {
+            signedUrl: $("signedUrl").value,
+            contentType: file.type || "image/jpeg",
+            bodyBase64: await readFileAsDataUrl(file),
+          });
+          writeOutput("Uploaded Image", state.uploadedImage);
+        },
+        createProduct: async () => {
+          const image = requireUploadedImage();
+          const model = await api("/api/products/create", { name: $("modelName").value, image });
+          renderAndWrite("Created Product", [model]);
+        },
+        createCharacter: async () => {
+          const image = requireUploadedImage();
+          const model = await api("/api/characters/create", { name: $("modelName").value, image });
+          renderAndWrite("Created Character", [model]);
+        },
+        generateImage: async () => {
+          const result = await api("/api/images/generate", {
+            prompt: $("prompt").value,
+            models: state.selected,
+            aspectRatio: $("imageRatio").value,
+            mode: $("mode").value,
+            samples: Number($("samples").value),
+            wait: $("waitImage").value === "true",
+          });
+          writeOutput("Image Generation", result);
+        },
+        generateVideo: async () => {
+          const result = await api("/api/videos/generate", {
+            prompt: $("prompt").value,
+            models: state.selected,
+            aspectRatio: $("videoRatio").value,
+            duration: Number($("videoDuration").value),
+            sound: $("videoSound").value,
+            mode: $("mode").value,
+            wait: $("waitVideo").value === "true",
+          });
+          writeOutput("Beta Video Generation", result);
+        },
+      };
+
+      async function api(path, payload = {}) {
+        const response = await fetch(path, {
+          method: "POST",
+          headers: {
+            "content-type": "application/json",
+          },
+          body: JSON.stringify({
+            config: getConfig(),
+            ...payload,
+          }),
+        });
+        const json = await response.json();
+
+        if (!response.ok) {
+          throw new Error(json.error ?? "Request failed.");
+        }
+
+        return json.data;
+      }
+
+      function getConfig() {
+        return {
+          firebaseApiKey: $("firebaseApiKey").value.trim(),
+          refreshToken: $("refreshToken").value.trim(),
+          workspaceId: $("workspaceId").value.trim(),
+        };
+      }
+
+      function renderAndWrite(title, data) {
+        if (Array.isArray(data)) {
+          renderModels(data);
+        }
+        writeOutput(title, data);
+      }
+
+      function renderModels(models) {
+        $("results").replaceChildren(
+          ...models.map((model) => {
+            const item = document.createElement("div");
+            item.className = "item";
+
+            const img = document.createElement("img");
+            img.className = "thumb";
+            img.alt = "";
+            img.src = model.thumbUrl || model.imageOptions?.[0]?.url || "";
+
+            const body = document.createElement("div");
+            body.innerHTML = `
+              <div>${escapeHtml(model.modelName ?? model.id)}</div>
+              <div class="muted mono">${escapeHtml(model.modelType ?? "")} · ${escapeHtml(model.status ?? "")}</div>
+              <div class="muted mono">${escapeHtml(model.id ?? "")}</div>
+            `;
+
+            const button = document.createElement("button");
+            button.textContent = "Use";
+            button.addEventListener("click", () => {
+              selectModel(model);
+            });
+
+            item.append(img, body, button);
+            return item;
+          }),
+        );
+      }
+
+      function selectModel(model) {
+        state.selected = state.selected.filter((item) => item.id !== model.id);
+        state.selected.push(model);
+        renderSelectedModels();
+        $("prompt").value = buildPrompt();
+      }
+
+      function renderSelectedModels() {
+        $("selectedModels").replaceChildren(
+          ...state.selected.map((model) => {
+            const pill = document.createElement("span");
+            pill.className = "pill";
+            pill.textContent = `${model.modelName} (${model.modelType})`;
+            return pill;
+          }),
+        );
+      }
+
+      function buildPrompt() {
+        const character = state.selected.find((model) => model.modelType === "CHARACTER");
+        const products = state.selected.filter((model) => model.modelType === "OBJECT");
+        const mentions = [];
+
+        if (character) {
+          mentions.push(mention(character));
+        }
+
+        if (products.length) {
+          mentions.push("with", products.map(mention).join(" "));
+        }
+
+        return mentions.join(" ");
+      }
+
+      function mention(model) {
+        return `@[${model.modelName}](${model.id})`;
+      }
+
+      function writeOutput(title, data) {
+        $("output").textContent = `${title}\n${JSON.stringify(data, null, 2)}`;
+      }
+
+      function requireUploadedImage() {
+        if (!state.uploadedImage) {
+          throw new Error("Parse or upload an image first.");
+        }
+
+        return state.uploadedImage;
+      }
+
+      function readFileAsDataUrl(file) {
+        return new Promise((resolve, reject) => {
+          const reader = new FileReader();
+          reader.onload = () => resolve(reader.result);
+          reader.onerror = () => reject(reader.error);
+          reader.readAsDataURL(file);
+        });
+      }
+
+      function escapeHtml(value) {
+        return String(value)
+          .replaceAll("&", "&amp;")
+          .replaceAll("<", "&lt;")
+          .replaceAll(">", "&gt;")
+          .replaceAll('"', "&quot;")
+          .replaceAll("'", "&#039;");
+      }
+    </script>
+  </body>
+</html>

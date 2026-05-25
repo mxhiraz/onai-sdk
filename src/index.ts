@@ -29,13 +29,7 @@ export {
   VideoGenerationDuration,
   VideoGenerationSound,
 };
-export type { OnaiClientConfig, ResolvedOnaiClientConfig } from "./config.js";
-export type {
-  OnaiConsentIntegrations,
-  OnaiRequestHeaderValue,
-  OnaiRequestHeadersConfig,
-  OnaiTrackingContext,
-} from "./internal/request-headers.js";
+export type { OnaiClientConfig } from "./config.js";
 export { SANTOS_RUNTIME_URLS, resolveOnaiRuntimeUrls } from "./runtime-config.js";
 export type { OnaiRuntimeUrlOverrides, OnaiRuntimeUrls } from "./runtime-config.js";
 export type {
