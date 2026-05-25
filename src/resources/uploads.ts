@@ -45,7 +45,7 @@ export class UploadsResource {
       headers: buildStandardRequestHeaders(this.headers, {
         accept: "application/json, text/plain, */*",
         "content-type": contentType,
-        Referer: this.referer,
+        referer: this.referer,
       }),
       body: input.body,
     });
