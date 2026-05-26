@@ -110,10 +110,10 @@ The sample page can test:
 
 When a request fails, the sample server logs a structured error to the terminal and returns the same debug payload to the page. The payload includes SDK error name, HTTP status, operation name, selected response headers such as `x-request-id` and rate-limit headers, GraphQL error messages, sanitized request variables, and a trimmed response-body preview.
 
-The prompt builder uses Santos mention syntax:
+The prompt builder can create Santos mention syntax from models selected in the sample UI:
 
 ```text
-@[tom](ZMvUvujEqQM23Jz7XAra) with @[tss_top](7SdzfyBZ6aKcnvnLmWKy)
+@[model name](model-id)
 ```
 
 Never commit `.env`, refresh tokens, access tokens, signed upload URLs, or copied browser auth payloads.
@@ -872,6 +872,7 @@ Bulk generate behavior:
 - `bulkGenerateAndWait()` calls `bulkGenerate()`, extracts the returned `imageGenerations[].id`, and polls each ID through direct `imageGeneration(id)` status requests.
 - The SDK generates a `bulkGenerationId` automatically when you do not pass one.
 - Each row can include `productModelIds`, `characterModelIds`, or both.
+- The SDK sends the bulk `prompt` exactly as provided. It does not append product or character mentions; row model IDs are sent separately in `rows`.
 - The response includes `bulkGenerationId` and `imageGenerations`.
 - Use `bulkGenerate()` without waiting when you want to store pending generation IDs and let a separate worker call `waitForBatch(ids)` later.
 
