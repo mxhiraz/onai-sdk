@@ -31,7 +31,7 @@ The SDK must never run in browser code because it handles refresh tokens. Every 
 The current release path is GitHub. Install a pinned release tag in backend projects:
 
 ```bash
-npm install github:mxhiraz/onai-sdk#v0.1.11
+npm install github:mxhiraz/onai-sdk#v0.1.13
 ```
 
 In `package.json`:
@@ -39,7 +39,7 @@ In `package.json`:
 ```json
 {
   "dependencies": {
-    "onai-sdk": "github:mxhiraz/onai-sdk#v0.1.11"
+    "onai-sdk": "github:mxhiraz/onai-sdk#v0.1.13"
   }
 }
 ```
@@ -47,7 +47,7 @@ In `package.json`:
 You can also install from the HTTPS Git URL:
 
 ```bash
-npm install git+https://github.com/mxhiraz/onai-sdk.git#v0.1.11
+npm install git+https://github.com/mxhiraz/onai-sdk.git#v0.1.13
 ```
 
 The package includes a `prepare` script, so GitHub installs build `dist` automatically before the SDK is packed for the consuming project.
@@ -160,15 +160,15 @@ git push
 Optional version tag:
 
 ```bash
-git tag v0.1.11
-git push origin v0.1.11
+git tag v0.1.13
+git push origin v0.1.13
 ```
 
 Downstream apps can install a branch, tag, or commit:
 
 ```bash
 npm install github:mxhiraz/onai-sdk#main
-npm install github:mxhiraz/onai-sdk#v0.1.11
+npm install github:mxhiraz/onai-sdk#v0.1.13
 npm install git+https://github.com/mxhiraz/onai-sdk.git#<commit-sha>
 ```
 
@@ -757,8 +757,6 @@ const characters = await onai.characters.search("tom");
 Use `onai.models.list()` only when you need to inspect everything in the workspace. Search belongs to the typed workflows: use `onai.products.search()` for product models and `onai.characters.search()` for character models. The Santos custom-model list operation currently rejects a `search` input, so typed search lists workspace models first and narrows the returned set by model text.
 
 ### Create And List Studios
-
-The studios module is available from the `main` branch and will be included in the next tagged release selected by the maintainers.
 
 Create a studio from reusable block IDs, custom text, or an ordered mix of both:
 
