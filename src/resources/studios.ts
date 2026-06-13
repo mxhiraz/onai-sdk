@@ -47,6 +47,16 @@ export interface StudioBlock {
   __typename?: string;
 }
 
+export interface StudioCategory {
+  id: string;
+  name?: string | null;
+  icon?: string | null;
+  blocks: StudioBlock[];
+  order?: number | null;
+  previewPromptTemplate?: string | null;
+  __typename?: string;
+}
+
 export interface StudioText {
   content: string;
   __typename?: string;
@@ -137,6 +147,10 @@ interface StudiosResponse {
 
 interface StudioCreateResponse {
   studioCreate: Studio;
+}
+
+interface StudioCategoriesResponse {
+  studioCategories: StudioCategory[];
 }
 
 export class StudiosResource {
@@ -279,6 +293,33 @@ export class StudiosResource {
 
     return data.studioCreate;
   }
+
+  async listCategories(): Promise<StudioCategory[]> {
+    const startedAt = Date.now();
+    this.logger.debug(
+      {
+        event: "studio.categories.start",
+      },
+      "Santos studio category fetch started.",
+    );
+
+    const data = await this.graphql.request<StudioCategoriesResponse>({
+      operationName: "studioCategories",
+      variables: {},
+      query: STUDIO_CATEGORIES_QUERY,
+    });
+
+    this.logger.debug(
+      {
+        event: "studio.categories.success",
+        count: data.studioCategories.length,
+        durationMs: Date.now() - startedAt,
+      },
+      "Santos studio category fetch completed.",
+    );
+
+    return data.studioCategories;
+  }
 }
 
 function normalizePromptParts(promptParts: StudioPromptPartInput[]): StudioPromptPartInput[] {
@@ -386,6 +427,45 @@ const STUDIOS_QUERY = `query studios($first: Int!, $cursor: String, $filters: St
 }
 
 ${STUDIO_LIST_FIELDS_FRAGMENT}`;
+
+const STUDIO_CATEGORIES_QUERY = `query studioCategories {
+  studioCategories {
+    ...StudioCategoryFields
+    __typename
+  }
+}
+
+fragment StudioCategoryFields on StudioCategory {
+  id
+  name
+  icon
+  blocks {
+    ...StudioBlockFields
+    __typename
+  }
+  order
+  previewPromptTemplate
+  __typename
+}
+
+fragment StudioBlockFields on StudioBlock {
+  id
+  categoryId
+  name
+  thumbnails {
+    ...StudioBlockThumbnailFields
+    __typename
+  }
+  workspaceId
+  prompt
+  order
+  __typename
+}
+
+fragment StudioBlockThumbnailFields on StudioBlockThumbnail {
+  url
+  __typename
+}`;
 
 const STUDIO_CREATE_MUTATION = `mutation studioCreate($name: String!, $published: Boolean!, $promptParts: [StudioPromptPartInput!]!, $thumbnails: [StudioThumbnailInput!]!, $type: StudioType!, $workspaceId: String, $remixedFromStudioId: String, $bestForCategories: [String!], $bestForSizes: [String!], $bestForSubcategories: [String!], $shortDescription: String, $longDescription: String, $chipColor: String) {
   studioCreate(

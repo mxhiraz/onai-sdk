@@ -121,6 +121,65 @@ test("studios.create sends prompt parts without injecting a remix id", async () 
   assert.equal(created.promptParts?.length, 2);
 });
 
+test("studios.listCategories returns studio blocks for creation", async () => {
+  const onai = createTestClient(async (_url, init) => {
+    const request = JSON.parse(String(init.body));
+    assert.equal(request.operationName, "studioCategories");
+    assert.deepEqual(request.variables, {});
+
+    return jsonResponse({
+      data: {
+        studioCategories: [
+          {
+            id: "lighting",
+            name: "Lighting",
+            icon: "sun",
+            blocks: [
+              {
+                id: "soft-light",
+                categoryId: "lighting",
+                name: "Soft light",
+                thumbnails: [
+                  {
+                    url: "https://assets.example/soft-light.jpg",
+                    __typename: "StudioBlockThumbnail",
+                  },
+                ],
+                workspaceId: null,
+                prompt: "soft diffused light",
+                order: 2,
+                __typename: "StudioBlock",
+              },
+              {
+                id: "hard-light",
+                categoryId: "lighting",
+                name: "Hard light",
+                thumbnails: [],
+                workspaceId: null,
+                prompt: "hard directional light",
+                order: 3,
+                __typename: "StudioBlock",
+              },
+            ],
+            order: 1,
+            previewPromptTemplate: "Preview with {{blockPrompt}}",
+            __typename: "StudioCategory",
+          },
+        ],
+      },
+    });
+  });
+
+  const categories = await onai.studios.listCategories();
+
+  assert.equal(categories.length, 1);
+  assert.equal(categories[0]?.id, "lighting");
+  assert.deepEqual(
+    categories[0]?.blocks.map((block) => block.id),
+    ["soft-light", "hard-light"],
+  );
+});
+
 function createTestClient(fetch) {
   return createOnaiClient({
     firebaseApiKey: "firebase-api-key",

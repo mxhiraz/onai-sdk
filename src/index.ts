@@ -110,6 +110,7 @@ export type {
   Studio,
   StudioBlock,
   StudioBlockPromptPartInput,
+  StudioCategory,
   StudioCreatedByUser,
   StudioListItem,
   StudioPageInfo,
