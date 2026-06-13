@@ -76,7 +76,7 @@ export interface StudioListItem {
   name?: string;
   published?: boolean;
   thumbnails?: StudioThumbnail[];
-  workspaceId?: string;
+  workspaceId?: string | null;
   type?: StudioType | string;
   createdAt?: string;
   createdBy?: string | null;
@@ -118,6 +118,13 @@ export interface ListStudiosInput {
   pageSize?: number;
   maxPages?: number;
 }
+
+export type ListCombinedStudiosInput = Omit<ListStudiosInput, "cursor" | "type">;
+
+export type ListGlobalStudiosInput = Pick<
+  ListStudiosInput,
+  "cursor" | "limit" | "pageSize" | "maxPages" | "orderBy"
+>;
 
 export interface CreateStudioInput {
   name: string;
@@ -164,73 +171,193 @@ export class StudiosResource {
     this.logger = config.logger;
   }
 
-  async list(input: ListStudiosInput = {}): Promise<StudioListItem[]> {
+  async list(input: ListCombinedStudiosInput = {}): Promise<StudioListItem[]> {
+    if ("cursor" in input && input.cursor != null) {
+      throw new OnaiValidationError(
+        "cursor is not supported by combined studio listing. Use listPage() or listGlobalPage().",
+      );
+    }
+
     const limit = normalizePositiveInteger(input.limit ?? 30, "limit");
-    const maxPages = normalizePositiveInteger(input.maxPages ?? 50, "maxPages");
-    const requestedPageSize = normalizePositiveInteger(input.pageSize ?? 30, "pageSize");
-    const studios: StudioListItem[] = [];
-    let cursor = input.cursor ?? null;
-    let pageCount = 0;
+    const startedAt = Date.now();
+    this.logger.debug(
+      {
+        event: "studio.list_combined.start",
+        workspaceId: input.workspaceId ?? this.workspaceId,
+        limit,
+        orderBy: input.orderBy ?? StudiosOrderBy.UsageCountDesc,
+      },
+      "Santos combined studio list started.",
+    );
 
-    do {
-      pageCount += 1;
-      const page = await this.listPage({
-        ...input,
-        cursor,
-        pageSize: Math.min(requestedPageSize, limit - studios.length),
-      });
-      studios.push(...page.studios);
-      cursor = page.pageInfo.nextCursor;
-    } while (cursor && studios.length < limit && pageCount < maxPages);
+    try {
+      const [workspaceStudios, globalStudios] = await Promise.all([
+        this.listWorkspace(input),
+        this.listGlobal({
+          limit,
+          ...(input.pageSize !== undefined ? { pageSize: input.pageSize } : {}),
+          ...(input.maxPages !== undefined ? { maxPages: input.maxPages } : {}),
+          ...(input.orderBy !== undefined ? { orderBy: input.orderBy } : {}),
+        }),
+      ]);
+      const studios = mergeStudios(workspaceStudios, globalStudios).slice(0, limit);
 
-    return studios.slice(0, limit);
+      this.logger.debug(
+        {
+          event: "studio.list_combined.success",
+          workspaceCount: workspaceStudios.length,
+          globalCount: globalStudios.length,
+          count: studios.length,
+          durationMs: Date.now() - startedAt,
+        },
+        "Santos combined studio list completed.",
+      );
+
+      return studios;
+    } catch (error) {
+      this.logger.error(
+        {
+          event: "studio.list_combined.failure",
+          durationMs: Date.now() - startedAt,
+          ...errorLogFields(error),
+        },
+        "Santos combined studio list failed.",
+      );
+      throw error;
+    }
+  }
+
+  async listWorkspace(input: ListStudiosInput = {}): Promise<StudioListItem[]> {
+    return this.listScope("workspace", input, (pageInput) => this.listPage(pageInput));
+  }
+
+  async listGlobal(input: ListGlobalStudiosInput = {}): Promise<StudioListItem[]> {
+    return this.listScope("global", input, (pageInput) => this.listGlobalPage(pageInput));
   }
 
   async listPage(input: ListStudiosInput = {}): Promise<StudiosPage> {
     const workspaceId = requireNonEmpty(input.workspaceId ?? this.workspaceId, "workspaceId");
-    const first = normalizePositiveInteger(input.pageSize ?? input.limit ?? 30, "pageSize");
-    const type = input.type ?? StudioType.Workspace;
-    const orderBy = input.orderBy ?? StudiosOrderBy.UsageCountDesc;
+    return this.fetchPage({
+      input,
+      filters: {
+        workspaceId,
+        type: input.type ?? StudioType.Workspace,
+      },
+      scope: "workspace",
+    });
+  }
+
+  async listGlobalPage(input: ListGlobalStudiosInput = {}): Promise<StudiosPage> {
+    return this.fetchPage({
+      input,
+      filters: {
+        published: true,
+      },
+      scope: "global",
+    });
+  }
+
+  private async listScope(
+    scope: "workspace" | "global",
+    input: ListGlobalStudiosInput,
+    fetchPage: (input: ListGlobalStudiosInput) => Promise<StudiosPage>,
+  ): Promise<StudioListItem[]> {
+    const startedAt = Date.now();
+    this.logger.debug(
+      {
+        event: "studio.list_scope.start",
+        scope,
+        limit: input.limit ?? 30,
+        pageSize: input.pageSize ?? 30,
+        maxPages: input.maxPages ?? 50,
+        hasCursor: Boolean(input.cursor),
+      },
+      "Santos scoped studio list started.",
+    );
+
+    try {
+      const studios = await listStudioPages(input, fetchPage);
+      this.logger.debug(
+        {
+          event: "studio.list_scope.success",
+          scope,
+          count: studios.length,
+          durationMs: Date.now() - startedAt,
+        },
+        "Santos scoped studio list completed.",
+      );
+      return studios;
+    } catch (error) {
+      this.logger.error(
+        {
+          event: "studio.list_scope.failure",
+          scope,
+          durationMs: Date.now() - startedAt,
+          ...errorLogFields(error),
+        },
+        "Santos scoped studio list failed.",
+      );
+      throw error;
+    }
+  }
+
+  private async fetchPage(request: {
+    input: ListGlobalStudiosInput;
+    filters: Record<string, unknown>;
+    scope: "workspace" | "global";
+  }): Promise<StudiosPage> {
+    const first = normalizePositiveInteger(request.input.pageSize ?? request.input.limit ?? 30, "pageSize");
+    const orderBy = request.input.orderBy ?? StudiosOrderBy.UsageCountDesc;
     const startedAt = Date.now();
 
     this.logger.debug(
       {
         event: "studio.list_page.start",
-        workspaceId,
+        scope: request.scope,
         first,
-        type,
         orderBy,
-        hasCursor: Boolean(input.cursor),
+        hasCursor: Boolean(request.input.cursor),
+        filters: request.filters,
       },
       "Santos studio page fetch started.",
     );
 
-    const data = await this.graphql.request<StudiosResponse>({
-      operationName: "studios",
-      variables: {
-        first,
-        cursor: input.cursor ?? null,
-        filters: {
-          workspaceId,
-          type,
+    try {
+      const data = await this.graphql.request<StudiosResponse>({
+        operationName: "studios",
+        variables: {
+          first,
+          cursor: request.input.cursor ?? null,
+          filters: request.filters,
+          orderBy,
         },
-        orderBy,
-      },
-      query: STUDIOS_QUERY,
-    });
+        query: STUDIOS_QUERY,
+      });
 
-    this.logger.debug(
-      {
-        event: "studio.list_page.success",
-        workspaceId,
-        count: data.studios.studios.length,
-        hasNextCursor: Boolean(data.studios.pageInfo.nextCursor),
-        durationMs: Date.now() - startedAt,
-      },
-      "Santos studio page fetch completed.",
-    );
+      this.logger.debug(
+        {
+          event: "studio.list_page.success",
+          scope: request.scope,
+          count: data.studios.studios.length,
+          hasNextCursor: Boolean(data.studios.pageInfo.nextCursor),
+          durationMs: Date.now() - startedAt,
+        },
+        "Santos studio page fetch completed.",
+      );
 
-    return data.studios;
+      return data.studios;
+    } catch (error) {
+      this.logger.error(
+        {
+          event: "studio.list_page.failure",
+          scope: request.scope,
+          durationMs: Date.now() - startedAt,
+          ...errorLogFields(error),
+        },
+        "Santos studio page fetch failed.",
+      );
+      throw error;
+    }
   }
 
   async create(input: CreateStudioInput): Promise<Studio> {
@@ -275,23 +402,36 @@ export class StudiosResource {
       "Santos studio create started.",
     );
 
-    const data = await this.graphql.request<StudioCreateResponse>({
-      operationName: "studioCreate",
-      variables,
-      query: STUDIO_CREATE_MUTATION,
-    });
+    try {
+      const data = await this.graphql.request<StudioCreateResponse>({
+        operationName: "studioCreate",
+        variables,
+        query: STUDIO_CREATE_MUTATION,
+      });
 
-    this.logger.info(
-      {
-        event: "studio.create.success",
-        workspaceId,
-        studioId: data.studioCreate.id,
-        durationMs: Date.now() - startedAt,
-      },
-      "Santos studio created.",
-    );
+      this.logger.info(
+        {
+          event: "studio.create.success",
+          workspaceId,
+          studioId: data.studioCreate.id,
+          durationMs: Date.now() - startedAt,
+        },
+        "Santos studio created.",
+      );
 
-    return data.studioCreate;
+      return data.studioCreate;
+    } catch (error) {
+      this.logger.error(
+        {
+          event: "studio.create.failure",
+          workspaceId,
+          durationMs: Date.now() - startedAt,
+          ...errorLogFields(error),
+        },
+        "Santos studio create failed.",
+      );
+      throw error;
+    }
   }
 
   async listCategories(): Promise<StudioCategory[]> {
@@ -303,23 +443,88 @@ export class StudiosResource {
       "Santos studio category fetch started.",
     );
 
-    const data = await this.graphql.request<StudioCategoriesResponse>({
-      operationName: "studioCategories",
-      variables: {},
-      query: STUDIO_CATEGORIES_QUERY,
-    });
+    try {
+      const data = await this.graphql.request<StudioCategoriesResponse>({
+        operationName: "studioCategories",
+        variables: {},
+        query: STUDIO_CATEGORIES_QUERY,
+      });
 
-    this.logger.debug(
-      {
-        event: "studio.categories.success",
-        count: data.studioCategories.length,
-        durationMs: Date.now() - startedAt,
-      },
-      "Santos studio category fetch completed.",
-    );
+      this.logger.debug(
+        {
+          event: "studio.categories.success",
+          count: data.studioCategories.length,
+          durationMs: Date.now() - startedAt,
+        },
+        "Santos studio category fetch completed.",
+      );
 
-    return data.studioCategories;
+      return data.studioCategories;
+    } catch (error) {
+      this.logger.error(
+        {
+          event: "studio.categories.failure",
+          durationMs: Date.now() - startedAt,
+          ...errorLogFields(error),
+        },
+        "Santos studio category fetch failed.",
+      );
+      throw error;
+    }
   }
+}
+
+async function listStudioPages(
+  input: ListGlobalStudiosInput,
+  fetchPage: (input: ListGlobalStudiosInput) => Promise<StudiosPage>,
+): Promise<StudioListItem[]> {
+  const limit = normalizePositiveInteger(input.limit ?? 30, "limit");
+  const maxPages = normalizePositiveInteger(input.maxPages ?? 50, "maxPages");
+  const requestedPageSize = normalizePositiveInteger(input.pageSize ?? 30, "pageSize");
+  const studios: StudioListItem[] = [];
+  let cursor = input.cursor ?? null;
+  let pageCount = 0;
+
+  do {
+    pageCount += 1;
+    const page = await fetchPage({
+      ...input,
+      cursor,
+      pageSize: Math.min(requestedPageSize, limit - studios.length),
+    });
+    studios.push(...page.studios);
+    cursor = page.pageInfo.nextCursor;
+  } while (cursor && studios.length < limit && pageCount < maxPages);
+
+  return studios.slice(0, limit);
+}
+
+function mergeStudios(workspaceStudios: StudioListItem[], globalStudios: StudioListItem[]): StudioListItem[] {
+  const studiosById = new Map<string, StudioListItem>();
+
+  for (const studio of [...workspaceStudios, ...globalStudios]) {
+    if (!studiosById.has(studio.id)) {
+      studiosById.set(studio.id, studio);
+    }
+  }
+
+  return [...studiosById.values()].sort(
+    (left, right) => (right.usageCount ?? 0) - (left.usageCount ?? 0),
+  );
+}
+
+function errorLogFields(error: unknown): Record<string, unknown> {
+  if (error instanceof Error) {
+    return {
+      errorName: error.name,
+      errorMessage: error.message,
+    };
+  }
+
+  return {
+    errorName: "UnknownError",
+    errorMessage: String(error),
+  };
 }
 
 function normalizePromptParts(promptParts: StudioPromptPartInput[]): StudioPromptPartInput[] {

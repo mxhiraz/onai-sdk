@@ -106,6 +106,8 @@ export type {
 export type { RawGraphqlRequest } from "./resources/raw.js";
 export type {
   CreateStudioInput,
+  ListCombinedStudiosInput,
+  ListGlobalStudiosInput,
   ListStudiosInput,
   Studio,
   StudioBlock,

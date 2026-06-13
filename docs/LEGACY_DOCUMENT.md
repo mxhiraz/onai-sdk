@@ -3,7 +3,7 @@
 Status: single source of truth
 Owner: SDK maintainers
 Audience: engineers, AI coding agents, integration partners, and future maintainers
-Last reviewed: 2026-06-13
+Last reviewed: 2026-06-14
 
 ## Purpose
 
@@ -31,7 +31,7 @@ The SDK must never run in browser code because it handles refresh tokens. Every 
 The current release path is GitHub. Install a pinned release tag in backend projects:
 
 ```bash
-npm install github:mxhiraz/onai-sdk#v0.1.14
+npm install github:mxhiraz/onai-sdk#v0.1.15
 ```
 
 In `package.json`:
@@ -39,7 +39,7 @@ In `package.json`:
 ```json
 {
   "dependencies": {
-    "onai-sdk": "github:mxhiraz/onai-sdk#v0.1.14"
+    "onai-sdk": "github:mxhiraz/onai-sdk#v0.1.15"
   }
 }
 ```
@@ -47,7 +47,7 @@ In `package.json`:
 You can also install from the HTTPS Git URL:
 
 ```bash
-npm install git+https://github.com/mxhiraz/onai-sdk.git#v0.1.14
+npm install git+https://github.com/mxhiraz/onai-sdk.git#v0.1.15
 ```
 
 The package includes a `prepare` script, so GitHub installs build `dist` automatically before the SDK is packed for the consuming project.
@@ -160,15 +160,15 @@ git push
 Optional version tag:
 
 ```bash
-git tag v0.1.14
-git push origin v0.1.14
+git tag v0.1.15
+git push origin v0.1.15
 ```
 
 Downstream apps can install a branch, tag, or commit:
 
 ```bash
 npm install github:mxhiraz/onai-sdk#main
-npm install github:mxhiraz/onai-sdk#v0.1.14
+npm install github:mxhiraz/onai-sdk#v0.1.15
 npm install git+https://github.com/mxhiraz/onai-sdk.git#<commit-sha>
 ```
 
@@ -237,7 +237,7 @@ The stable modules are:
 | `onai.products` | Stable | Create, list, and search product models. |
 | `onai.characters` | Stable | Create, list, and search character models. |
 | `onai.models` | Stable | List products and characters together for inspection. |
-| `onai.studios` | Stable | Discover studio categories/blocks, create studios, and list workspace studios with cursor pagination. |
+| `onai.studios` | Stable | Discover categories/blocks, create studios, and list combined workspace plus global published studios. |
 | `onai.images` | Stable | Generate images, fetch generation history/status, wait for single or batched completion, and build prompt/model helper values. |
 | `onai.generations` | Stable alias | Alias of `onai.images`. |
 | `onai.raw` | Stable escape hatch | Call unsupported Santos GraphQL operations directly. |
@@ -290,7 +290,7 @@ sequenceDiagram
 
 ### Studio Flow
 
-Use this flow for `onai.studios.listCategories()`, `onai.studios.list()`, `onai.studios.listPage()`, and `onai.studios.create()`.
+Use this flow for category discovery, combined/global/workspace studio listing, and studio creation.
 
 ```mermaid
 sequenceDiagram
@@ -301,6 +301,15 @@ sequenceDiagram
   Backend->>SDK: studios.listCategories()
   SDK->>GraphQL: studioCategories
   GraphQL-->>SDK: Categories with reusable blocks
+  Backend->>SDK: studios.list()
+  par Workspace studios
+    SDK->>GraphQL: studios(filters: workspaceId + WORKSPACE)
+    GraphQL-->>SDK: Workspace studios
+  and Global studios
+    SDK->>GraphQL: studios(filters: published true)
+    GraphQL-->>SDK: Global published studios
+  end
+  SDK-->>Backend: Deduplicated usage-sorted studios
   Backend->>SDK: studios.create({ promptParts })
   SDK->>GraphQL: studioCreate
   GraphQL-->>SDK: Studio with id and prompt parts
@@ -309,7 +318,7 @@ sequenceDiagram
   SDK->>GraphQL: imageGenerationCreate
 ```
 
-Studio prompt parts preserve the caller's exact array order. A studio can mix reusable block IDs with custom text entries.
+Studio prompt parts preserve the caller's exact array order. A studio can mix reusable block IDs with custom text entries. Combined listing sends the workspace and global queries concurrently, keeps the workspace copy when the same studio ID appears in both responses, sorts by descending usage count, and applies the requested total limit.
 
 ### Generation Flow
 
@@ -414,7 +423,7 @@ This pattern minimizes device load and API load. The device makes cheap requests
 | `onai.products` | Creates, lists, and searches product models. Products use `modelType: "OBJECT"`. | Pass direct image bytes to `products.create()` for simple flows, or pass an uploaded image reference if you already uploaded. | At least one image is required; duplicate model names may still create new models; model warnings may be returned for low-resolution or unclear product images. |
 | `onai.characters` | Creates, lists, and searches character models. Characters use `modelType: "CHARACTER"`. | Use one clear portrait/body reference when possible. Keep the returned model ID for prompt mentions. | Low-resolution faces may produce warnings; missing `imageOptions` can block generation config; character and product IDs must not be mixed in prompt config. |
 | `onai.models` | Lists all product and character models together. | Use for admin/debug screens. Use typed `products.search()` or `characters.search()` for app workflows. | Santos does not accept server-side `search` for custom models right now, so search is SDK-side after listing. Cache repeated reads if your app calls it often. |
-| `onai.studios` | Lists studio categories/blocks, lists workspace studios, and creates studios from ordered block/text prompt parts. | Use `listCategories()` to discover valid block IDs, `listPage()` for UI pagination, `list()` for bounded backend reads, and pass returned studio IDs into image generation. | Categories are returned as one complete list; `promptParts` must not be empty; block IDs and text content are validated; `remixedFromStudioId` is sent only when explicitly provided. |
+| `onai.studios` | Lists categories/blocks, combines workspace and global published studios, and creates studios from ordered block/text prompt parts. | Use `list()` for combined discovery, `listWorkspace()` or `listGlobal()` for explicit scopes, page methods for cursor UI, and pass returned studio IDs into image generation. | Combined reads make two concurrent GraphQL requests, deduplicate by studio ID with workspace records winning, and sort by usage count. Categories are returned as one complete list. |
 | `onai.images` | Generates images, bulk-generates catalog rows, reads history, polls status, checks cooldown, builds mentions and model configs. | Use `bulkGenerateAndWait()` for blocking catalog shoots, `bulkGenerate()` for fire-and-store shoots, `generate()` for one task, and `waitFor()` for one generation. | Cooldown may block usage; `originalImageUrl` is `null` until READY; rate limits can apply. `list({ ids, bulkGenerationId })` filters history SDK-side for dashboard-style reads. |
 | `onai.generations` | Stable alias of `onai.images`. | Use only when the word "generation" is clearer in app code. | Same behavior and edge cases as `onai.images`. |
 | `onai.beta.videos` | Beta video generation using the same generation task shape with `assetType: "VIDEO"`. | Keep behind feature flags and use worker polling. | Beta API may change; video waits may exceed normal HTTP timeouts; output may take longer than images. |
@@ -604,8 +613,19 @@ What gets logged:
 | GraphQL | Operation start, sanitized variables at `trace`, success, HTTP errors, GraphQL errors, request ID, rate-limit remaining, duration. |
 | Uploads | Upload URL creation, storage PUT start/success/failure. |
 | Models | Product/character custom-model create and list operations. |
+| Studios | Category reads, combined/scoped lists, page fetches, studio creation, scope, counts, duration, and failures. |
 | Images | Cooldown checks, generation create, generation history pagination, wait/poll lifecycle. |
 | Beta videos | Same generation lifecycle as images, under the beta video component. |
+
+Studio event names:
+
+- `studio.categories.start`, `studio.categories.success`, `studio.categories.failure`
+- `studio.list_combined.start`, `studio.list_combined.success`, `studio.list_combined.failure`
+- `studio.list_scope.start`, `studio.list_scope.success`, `studio.list_scope.failure`
+- `studio.list_page.start`, `studio.list_page.success`, `studio.list_page.failure`
+- `studio.create.start`, `studio.create.success`, `studio.create.failure`
+
+Studio list events include `scope: "workspace"` or `scope: "global"` where applicable. Failure events include a safe error name and message; lower GraphQL logs retain request IDs, status codes, and rate-limit metadata for debugging.
 
 Log safety rules:
 
@@ -811,32 +831,67 @@ console.log(studio.id);
 
 The SDK preserves `promptParts` order. It does not inject a default `remixedFromStudioId`; provide that field only when intentionally remixing another studio.
 
-List workspace studios with automatic bounded pagination:
+List workspace and global published studios together:
 
 ```ts
 const studios = await onai.studios.list({
   limit: 60,
   pageSize: 30,
-  type: StudioType.Workspace,
   orderBy: StudiosOrderBy.UsageCountDesc,
 });
 ```
 
-Use `listPage()` for manual cursor pagination:
+`list()` makes the workspace and global requests concurrently. It deduplicates by studio ID, keeps the workspace record when the same ID appears in both scopes, sorts the merged result by descending `usageCount`, and then applies `limit`.
+
+Use explicit scope methods when the application needs only one source:
 
 ```ts
-const page = await onai.studios.listPage({
+const workspaceStudios = await onai.studios.listWorkspace({
+  limit: 60,
+  pageSize: 30,
+});
+
+const globalStudios = await onai.studios.listGlobal({
+  limit: 60,
+  pageSize: 30,
+});
+```
+
+Global listing sends `filters: { published: true }` without a workspace ID. Workspace listing sends the configured workspace ID with `type: "WORKSPACE"`.
+
+Use `listPage()` for manual workspace cursor pagination:
+
+```ts
+const workspacePage = await onai.studios.listPage({
   cursor: null,
   pageSize: 30,
 });
 
-const nextPage = page.pageInfo.nextCursor
+const nextWorkspacePage = workspacePage.pageInfo.nextCursor
   ? await onai.studios.listPage({
-      cursor: page.pageInfo.nextCursor,
+      cursor: workspacePage.pageInfo.nextCursor,
       pageSize: 30,
     })
   : null;
 ```
+
+Use `listGlobalPage()` for manual global cursor pagination:
+
+```ts
+const globalPage = await onai.studios.listGlobalPage({
+  cursor: null,
+  pageSize: 30,
+});
+
+const nextGlobalPage = globalPage.pageInfo.nextCursor
+  ? await onai.studios.listGlobalPage({
+      cursor: globalPage.pageInfo.nextCursor,
+      pageSize: 30,
+    })
+  : null;
+```
+
+Do not pass a cursor to combined `list()`. Workspace and global results have independent cursors, so combined pagination cannot safely use one cursor. Use the scope-specific page methods when building an infinite-scroll UI.
 
 Pass the created or selected studio ID into image generation:
 
@@ -1204,7 +1259,7 @@ Use this prompt when asking an AI coding assistant to integrate or update the SD
 ```text
 You are integrating the OnAI server-side TypeScript SDK. Keep the SDK server-only. Load refreshToken, firebaseApiKey, and workspaceId from server-side configuration or the app database for each connected account. Do not expose credentials to browser code.
 
-Use onai.auth for persisted auth token state, onai.uploads for source-image uploads, onai.products for product models, onai.characters for character models, onai.models only for listing all models, onai.studios for discovering categories/blocks and listing/creating studios, onai.images for stable image generation, and onai.beta.videos only for beta video generation. Load authTokenState from the database when creating the SDK client and save onAuthTokenChange back to the database so the SDK does not refresh auth on every request. Product and character creation can accept either an uploaded image reference or a direct upload payload with fileName, contentType, and body. Call studios.listCategories() to obtain valid reusable block IDs. Studio creation accepts ordered BLOCK and TEXT prompt parts; preserve their order and never inject remixedFromStudioId unless the application explicitly supplies it. Pass returned studio IDs to image generation through studioIds. For backend observability, pass logger: true or a Fastify/Pino-style logger and choose logLevel. After creating a single generation, call waitFor(id) to fetch the READY generation and read originalImageUrl/originalImageUrls. For blocking catalog fan-out jobs, call bulkGenerateAndWait() so the SDK creates rows in one Santos mutation, extracts returned generation IDs, and polls direct imageGeneration(id) status calls with controlled concurrency. For fire-and-store jobs, call bulkGenerate(), store returned generation IDs, and let one backend worker call waitForBatch(ids). Keep video behind beta controls. Use exported enums instead of raw strings where possible.
+Use onai.auth for persisted auth token state, onai.uploads for source-image uploads, onai.products for product models, onai.characters for character models, onai.models only for listing all models, onai.studios for discovering categories/blocks and listing/creating studios, onai.images for stable image generation, and onai.beta.videos only for beta video generation. Load authTokenState from the database when creating the SDK client and save onAuthTokenChange back to the database so the SDK does not refresh auth on every request. Product and character creation can accept either an uploaded image reference or a direct upload payload with fileName, contentType, and body. Call studios.listCategories() to obtain valid reusable block IDs. Call studios.list() for a deduplicated combination of workspace and global published studios, studios.listWorkspace() for workspace-only results, or studios.listGlobal() for global-only results. Use listPage() and listGlobalPage() when each scope needs its own cursor. Studio creation accepts ordered BLOCK and TEXT prompt parts; preserve their order and never inject remixedFromStudioId unless the application explicitly supplies it. Pass returned studio IDs to image generation through studioIds. For backend observability, pass logger: true or a Fastify/Pino-style logger and choose logLevel; studio category, combined list, scoped list, page fetch, create, and failure events are emitted when logging is enabled. After creating a single generation, call waitFor(id) to fetch the READY generation and read originalImageUrl/originalImageUrls. For blocking catalog fan-out jobs, call bulkGenerateAndWait() so the SDK creates rows in one Santos mutation, extracts returned generation IDs, and polls direct imageGeneration(id) status calls with controlled concurrency. For fire-and-store jobs, call bulkGenerate(), store returned generation IDs, and let one backend worker call waitForBatch(ids). Keep video behind beta controls. Use exported enums instead of raw strings where possible.
 
 Preserve Santos branding in public docs and user-facing errors. Do not expose raw upstream errors. After changes, run npm run build and scan for stale stable video references, non-Santos branding, and .ts import endings.
 ```
@@ -1219,6 +1274,8 @@ Preserve Santos branding in public docs and user-facing errors. Do not expose ra
 | Studio block | Reusable Santos prompt component referenced by `blockId`. |
 | Studio category | Group of reusable studio blocks returned by `studios.listCategories()`. |
 | Studio text | Custom text content placed directly into ordered studio prompt parts. |
+| Global studio | Published studio returned without filtering by a workspace ID. |
+| Workspace studio | Studio returned for the configured workspace with type `WORKSPACE`. |
 | Prompt mention | `@[name](id)` reference inserted into prompts. |
 | Model config | `id`, `imageUrl`, and `modelType` passed to generation. |
 | Stable API | Public SDK surface expected to avoid breaking changes. |
