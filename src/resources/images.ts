@@ -4,6 +4,7 @@ import type { CustomModel, CustomModelType } from "../internal/custom-models.js"
 import { OnaiApiError, OnaiValidationError } from "../internal/errors.js";
 import type { SantosGraphqlClient } from "../internal/graphql.js";
 import type { ResolvedOnaiLogger } from "../internal/logger.js";
+import type { StudioListItem } from "./studios.js";
 
 export type ImageGenerationAssetType = "IMAGE" | "VIDEO";
 export enum ImageGenerationMode {
@@ -279,24 +280,6 @@ export interface ImageGenerationCustomModelConfig {
     hadWarnings?: boolean;
     __typename?: string;
   };
-  __typename?: string;
-}
-
-export interface StudioListItem {
-  id: string;
-  name?: string;
-  published?: boolean;
-  thumbnails?: Array<{ url: string; __typename?: string }>;
-  workspaceId?: string;
-  type?: string;
-  createdAt?: string;
-  usageCount?: number;
-  isProductShotTemplate?: boolean;
-  remixedFromStudioId?: string | null;
-  bestForCategories?: string[];
-  bestForSizes?: string[];
-  bestForSubcategories?: string[];
-  shotNewSubcategories?: string[];
   __typename?: string;
 }
 

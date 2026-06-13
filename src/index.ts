@@ -18,6 +18,12 @@ import {
 import { ModelsResource } from "./resources/models.js";
 import { ProductsResource } from "./resources/products.js";
 import { RawResource } from "./resources/raw.js";
+import {
+  StudioPromptPartType,
+  StudiosOrderBy,
+  StudiosResource,
+  StudioType,
+} from "./resources/studios.js";
 import { UploadsResource } from "./resources/uploads.js";
 
 export { OnaiSdkError, OnaiAuthError, OnaiApiError, OnaiValidationError } from "./internal/errors.js";
@@ -37,6 +43,9 @@ export {
   VideoGenerationCameraMotion,
   VideoGenerationDuration,
   VideoGenerationSound,
+  StudioPromptPartType,
+  StudiosOrderBy,
+  StudioType,
 };
 export type { OnaiClientConfig } from "./config.js";
 export { SANTOS_RUNTIME_URLS, resolveOnaiRuntimeUrls } from "./runtime-config.js";
@@ -80,7 +89,6 @@ export type {
   ListImageGenerationsInput,
   PointInput,
   SizeInput,
-  StudioListItem,
   UserFreeImageCooldownStatus,
   WaitForBatchImageGenerationsInput,
   WaitForImageGenerationInput,
@@ -96,6 +104,23 @@ export type {
   ProductUploadImageInput,
 } from "./resources/products.js";
 export type { RawGraphqlRequest } from "./resources/raw.js";
+export type {
+  CreateStudioInput,
+  ListStudiosInput,
+  Studio,
+  StudioBlock,
+  StudioBlockPromptPartInput,
+  StudioCreatedByUser,
+  StudioListItem,
+  StudioPageInfo,
+  StudioPromptPart,
+  StudioPromptPartInput,
+  StudiosPage,
+  StudioText,
+  StudioTextPromptPartInput,
+  StudioThumbnail,
+  StudioThumbnailInput,
+} from "./resources/studios.js";
 export type {
   CreateWorkspaceAssetUploadUrlInput,
   CreateWorkspaceAssetUploadUrlsInput,
@@ -117,6 +142,7 @@ export interface OnaiClient {
   models: ModelsResource;
   products: ProductsResource;
   characters: CharactersResource;
+  studios: StudiosResource;
   uploads: UploadsResource;
   raw: RawResource;
 }
@@ -188,6 +214,11 @@ export function createOnaiClient(config: OnaiClientConfig): OnaiClient {
     characters: new CharactersResource({
       customModels,
       uploads,
+    }),
+    studios: new StudiosResource({
+      graphql,
+      workspaceId: resolvedConfig.workspaceId,
+      logger: resolvedConfig.logger.child({ component: "studios" }),
     }),
     uploads,
     raw: new RawResource(graphql),
