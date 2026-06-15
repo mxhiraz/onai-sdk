@@ -203,7 +203,10 @@ export interface UserFreeImageCooldownStatus {
 
 export interface ImageGeneration {
   id: string;
+  /** Canonical prompt. Prefers promptRaw so model mention IDs are preserved. */
+  prompt?: string;
   promptRaw?: string;
+  /** Human-readable UI prompt. Model mentions may be simplified to @name. */
   promptDisplay?: string;
   status: string;
   statusMessage?: string | null;
@@ -1168,6 +1171,7 @@ function filterGenerationsPage(
 }
 
 function normalizeGenerationOutput(generation: ImageGeneration): ImageGeneration {
+  const prompt = generation.promptRaw ?? generation.promptDisplay;
   const originalImageUrls =
     generation.output
       ?.map((output) => output.originalUrl ?? output.url)
@@ -1175,6 +1179,7 @@ function normalizeGenerationOutput(generation: ImageGeneration): ImageGeneration
 
   return {
     ...generation,
+    ...(prompt !== undefined ? { prompt } : {}),
     originalImageUrl: originalImageUrls[0] ?? null,
     originalImageUrls,
   };

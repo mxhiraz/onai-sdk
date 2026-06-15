@@ -31,7 +31,7 @@ The SDK must never run in browser code because it handles refresh tokens. Every 
 The current release path is GitHub. Install a pinned release tag in backend projects:
 
 ```bash
-npm install github:mxhiraz/onai-sdk#v0.1.16
+npm install github:mxhiraz/onai-sdk#v0.1.17
 ```
 
 In `package.json`:
@@ -39,7 +39,7 @@ In `package.json`:
 ```json
 {
   "dependencies": {
-    "onai-sdk": "github:mxhiraz/onai-sdk#v0.1.16"
+    "onai-sdk": "github:mxhiraz/onai-sdk#v0.1.17"
   }
 }
 ```
@@ -47,7 +47,7 @@ In `package.json`:
 You can also install from the HTTPS Git URL:
 
 ```bash
-npm install git+https://github.com/mxhiraz/onai-sdk.git#v0.1.16
+npm install git+https://github.com/mxhiraz/onai-sdk.git#v0.1.17
 ```
 
 The package includes a `prepare` script, so GitHub installs build `dist` automatically before the SDK is packed for the consuming project.
@@ -160,15 +160,15 @@ git push
 Optional version tag:
 
 ```bash
-git tag v0.1.16
-git push origin v0.1.16
+git tag v0.1.17
+git push origin v0.1.17
 ```
 
 Downstream apps can install a branch, tag, or commit:
 
 ```bash
 npm install github:mxhiraz/onai-sdk#main
-npm install github:mxhiraz/onai-sdk#v0.1.16
+npm install github:mxhiraz/onai-sdk#v0.1.17
 npm install git+https://github.com/mxhiraz/onai-sdk.git#<commit-sha>
 ```
 
@@ -959,9 +959,18 @@ console.log(completed.id);
 console.log(completed.status);
 console.log(completed.originalImageUrl);
 console.log(completed.originalImageUrls);
+console.log(completed.prompt);
 ```
 
 `generate()` returns the generation task. `waitFor(id)` polls Santos `imageGeneration(id)` until the generation is `READY`, then returns the completed generation. `originalImageUrl` is the first completed output's original URL. It is `null` until Santos returns generated output. `originalImageUrls` contains every generated output URL, so use it when `samples` is `Images2` or `Images4`.
+
+Prompt fields:
+
+- `prompt` is the canonical SDK prompt and prefers `promptRaw`. Use it when storing or reusing a generation prompt.
+- `promptRaw` preserves model mentions exactly, including `@[name](model-id)`.
+- `promptDisplay` is intended only for human-readable UI and may simplify mentions to `@name`.
+
+The SDK sends the caller's `prompt` to generation unchanged. It does not move, append, remove, or rewrite model mentions. Build mentions with `onai.images.mention(model)` or provide the exact `@[name](id)` syntax yourself. Never reuse `promptDisplay` as generation input when model identity must be preserved.
 
 You can also inspect generation history directly:
 
@@ -1289,7 +1298,7 @@ Use this prompt when asking an AI coding assistant to integrate or update the SD
 ```text
 You are integrating the OnAI server-side TypeScript SDK. Keep the SDK server-only. Load refreshToken, firebaseApiKey, and workspaceId from server-side configuration or the app database for each connected account. Do not expose credentials to browser code.
 
-Use onai.auth for persisted auth token state, onai.uploads for source-image uploads, onai.products for product models, onai.characters for character models, onai.models only for listing all models, onai.studios for discovering categories/blocks and previewing/listing/creating studios, onai.images for stable image generation, and onai.beta.videos only for beta video generation. Load authTokenState from the database when creating the SDK client and save onAuthTokenChange back to the database so the SDK does not refresh auth on every request. Product and character creation can accept either an uploaded image reference or a direct upload payload with fileName, contentType, and body. Call studios.listCategories() to obtain valid reusable block IDs and studios.preview() to render ordered BLOCK/TEXT parts before creation. Call studios.list() for a deduplicated combination of workspace and global published studios, studios.listWorkspace() for workspace-only results, or studios.listGlobal() for global-only results. Use listPage() and listGlobalPage() when each scope needs its own cursor. Studio creation accepts ordered BLOCK and TEXT prompt parts; preserve their order and never inject remixedFromStudioId unless the application explicitly supplies it. Pass returned studio IDs to image generation through studioIds. For backend observability, pass logger: true or a Fastify/Pino-style logger and choose logLevel; studio category, preview, combined list, scoped list, page fetch, create, and failure events are emitted when logging is enabled. After creating a single generation, call waitFor(id) to fetch the READY generation and read originalImageUrl/originalImageUrls. For blocking catalog fan-out jobs, call bulkGenerateAndWait() so the SDK creates rows in one Santos mutation, extracts returned generation IDs, and polls direct imageGeneration(id) status calls with controlled concurrency. For fire-and-store jobs, call bulkGenerate(), store returned generation IDs, and let one backend worker call waitForBatch(ids). Keep video behind beta controls. Use exported enums instead of raw strings where possible.
+Use onai.auth for persisted auth token state, onai.uploads for source-image uploads, onai.products for product models, onai.characters for character models, onai.models only for listing all models, onai.studios for discovering categories/blocks and previewing/listing/creating studios, onai.images for stable image generation, and onai.beta.videos only for beta video generation. Load authTokenState from the database when creating the SDK client and save onAuthTokenChange back to the database so the SDK does not refresh auth on every request. Product and character creation can accept either an uploaded image reference or a direct upload payload with fileName, contentType, and body. Call studios.listCategories() to obtain valid reusable block IDs and studios.preview() to render ordered BLOCK/TEXT parts before creation. Call studios.list() for a deduplicated combination of workspace and global published studios, studios.listWorkspace() for workspace-only results, or studios.listGlobal() for global-only results. Use listPage() and listGlobalPage() when each scope needs its own cursor. Studio creation accepts ordered BLOCK and TEXT prompt parts; preserve their order and never inject remixedFromStudioId unless the application explicitly supplies it. Pass returned studio IDs to image generation through studioIds. Build model mentions with images.mention() and preserve their exact position in the prompt. The SDK sends generation prompts unchanged. When reading a generation, use prompt or promptRaw to retain `@[name](id)` syntax; promptDisplay is UI-only and may contain plain `@name`. For backend observability, pass logger: true or a Fastify/Pino-style logger and choose logLevel; studio category, preview, combined list, scoped list, page fetch, create, and failure events are emitted when logging is enabled. After creating a single generation, call waitFor(id) to fetch the READY generation and read originalImageUrl/originalImageUrls. For blocking catalog fan-out jobs, call bulkGenerateAndWait() so the SDK creates rows in one Santos mutation, extracts returned generation IDs, and polls direct imageGeneration(id) status calls with controlled concurrency. For fire-and-store jobs, call bulkGenerate(), store returned generation IDs, and let one backend worker call waitForBatch(ids). Keep video behind beta controls. Use exported enums instead of raw strings where possible.
 
 Preserve Santos branding in public docs and user-facing errors. Do not expose raw upstream errors. After changes, run npm run build and scan for stale stable video references, non-Santos branding, and .ts import endings.
 ```
@@ -1308,6 +1317,8 @@ Preserve Santos branding in public docs and user-facing errors. Do not expose ra
 | Global studio | Published studio returned without filtering by a workspace ID. |
 | Workspace studio | Studio returned for the configured workspace with type `WORKSPACE`. |
 | Prompt mention | `@[name](id)` reference inserted into prompts. |
+| Canonical prompt | `generation.prompt`; prefers `promptRaw` so mention IDs remain available for reuse. |
+| Display prompt | `generation.promptDisplay`; human-readable UI text that may simplify mentions to `@name`. |
 | Model config | `id`, `imageUrl`, and `modelType` passed to generation. |
 | Stable API | Public SDK surface expected to avoid breaking changes. |
 | Beta API | Public SDK surface allowed to change before promotion. |
