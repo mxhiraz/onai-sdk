@@ -295,6 +295,89 @@ test("studios.listCategories returns studio blocks for creation", async () => {
   );
 });
 
+test("studios.preview renders ordered prompt parts with defaults and logs", async () => {
+  const events = [];
+  const onai = createTestClient(
+    async (_url, init) => {
+      const request = JSON.parse(String(init.body));
+      assert.equal(request.operationName, "imageGenerationPreview");
+      assert.deepEqual(request.variables, {
+        prompt: "",
+        aspectRatio: "4:5",
+        promptPartsInput: [
+          {
+            type: "BLOCK",
+            blockId: "lighting-block",
+          },
+          {
+            type: "TEXT",
+            content: " clean white backdrop",
+          },
+        ],
+        seed: 42,
+      });
+
+      return jsonResponse({
+        data: {
+          imageGenerationPreview: {
+            url: "https://assets.example/studio-preview.jpg",
+            __typename: "ImageGenerationPreview",
+          },
+        },
+      });
+    },
+    {
+      logger: createMemoryLogger(events),
+    },
+  );
+
+  const preview = await onai.studios.preview({
+    promptParts: [
+      {
+        type: "BLOCK",
+        blockId: "lighting-block",
+      },
+      {
+        type: "TEXT",
+        content: " clean white backdrop",
+      },
+    ],
+  });
+
+  assert.equal(preview.url, "https://assets.example/studio-preview.jpg");
+  assert.ok(events.some((event) => event.obj?.event === "studio.preview.start"));
+  assert.ok(events.some((event) => event.obj?.event === "studio.preview.success"));
+});
+
+test("studios.preview logs failures", async () => {
+  const events = [];
+  const onai = createTestClient(
+    async () =>
+      new Response(JSON.stringify({ errors: [{ message: "Preview rejected." }] }), {
+        status: 400,
+        headers: {
+          "content-type": "application/json",
+        },
+      }),
+    {
+      logger: createMemoryLogger(events),
+    },
+  );
+
+  await assert.rejects(
+    onai.studios.preview({
+      promptParts: [
+        {
+          type: "BLOCK",
+          blockId: "lighting-block",
+        },
+      ],
+    }),
+    /Santos request failed/,
+  );
+  assert.ok(events.some((event) => event.obj?.event === "studio.preview.failure"));
+});
+
 function createTestClient(fetch, config = {}) {
   return createOnaiClient({
     firebaseApiKey: "firebase-api-key",

@@ -1,6 +1,7 @@
 import { OnaiValidationError } from "../internal/errors.js";
 import type { SantosGraphqlClient } from "../internal/graphql.js";
 import type { ResolvedOnaiLogger } from "../internal/logger.js";
+import { ImageGenerationAspectRatio } from "./images.js";
 
 export enum StudioType {
   Workspace = "WORKSPACE",
@@ -142,6 +143,18 @@ export interface CreateStudioInput {
   chipColor?: string;
 }
 
+export interface PreviewStudioInput {
+  promptParts: StudioPromptPartInput[];
+  prompt?: string;
+  aspectRatio?: ImageGenerationAspectRatio;
+  seed?: number;
+}
+
+export interface StudioPreview {
+  url: string;
+  __typename?: string;
+}
+
 interface StudiosResourceConfig {
   graphql: SantosGraphqlClient;
   workspaceId: string;
@@ -158,6 +171,10 @@ interface StudioCreateResponse {
 
 interface StudioCategoriesResponse {
   studioCategories: StudioCategory[];
+}
+
+interface StudioPreviewResponse {
+  imageGenerationPreview: StudioPreview;
 }
 
 export class StudiosResource {
@@ -434,6 +451,62 @@ export class StudiosResource {
     }
   }
 
+  async preview(input: PreviewStudioInput): Promise<StudioPreview> {
+    const promptParts = normalizePromptParts(input.promptParts);
+    const aspectRatio = input.aspectRatio ?? ImageGenerationAspectRatio.Portrait4x5;
+    const seed = normalizeInteger(input.seed ?? 42, "seed");
+    const startedAt = Date.now();
+    const variables = {
+      prompt: input.prompt ?? "",
+      aspectRatio,
+      promptPartsInput: promptParts,
+      seed,
+    };
+
+    this.logger.info(
+      {
+        event: "studio.preview.start",
+        aspectRatio,
+        seed,
+        promptPartCount: promptParts.length,
+        hasPrompt: variables.prompt.length > 0,
+      },
+      "Santos studio preview started.",
+    );
+
+    try {
+      const data = await this.graphql.request<StudioPreviewResponse>({
+        operationName: "imageGenerationPreview",
+        variables,
+        query: STUDIO_PREVIEW_QUERY,
+      });
+
+      this.logger.info(
+        {
+          event: "studio.preview.success",
+          aspectRatio,
+          seed,
+          durationMs: Date.now() - startedAt,
+        },
+        "Santos studio preview completed.",
+      );
+
+      return data.imageGenerationPreview;
+    } catch (error) {
+      this.logger.error(
+        {
+          event: "studio.preview.failure",
+          aspectRatio,
+          seed,
+          durationMs: Date.now() - startedAt,
+          ...errorLogFields(error),
+        },
+        "Santos studio preview failed.",
+      );
+      throw error;
+    }
+  }
+
   async listCategories(): Promise<StudioCategory[]> {
     const startedAt = Date.now();
     this.logger.debug(
@@ -577,6 +650,14 @@ function normalizePositiveInteger(value: number, field: string): number {
   return value;
 }
 
+function normalizeInteger(value: number, field: string): number {
+  if (!Number.isInteger(value)) {
+    throw new OnaiValidationError(`${field} must be an integer.`);
+  }
+
+  return value;
+}
+
 function requireNonEmpty(value: string | undefined, field: string): string {
   if (typeof value !== "string" || value.trim().length === 0) {
     throw new OnaiValidationError(`${field} is required.`);
@@ -670,6 +751,15 @@ fragment StudioBlockFields on StudioBlock {
 fragment StudioBlockThumbnailFields on StudioBlockThumbnail {
   url
   __typename
+}`;
+
+const STUDIO_PREVIEW_QUERY = `query imageGenerationPreview($prompt: String!, $aspectRatio: String!, $promptPartsInput: [StudioPromptPartInput!], $seed: Int!) {
+  imageGenerationPreview(
+    input: {prompt: $prompt, aspectRatio: $aspectRatio, promptPartsInput: $promptPartsInput, seed: $seed}
+  ) {
+    url
+    __typename
+  }
 }`;
 
 const STUDIO_CREATE_MUTATION = `mutation studioCreate($name: String!, $published: Boolean!, $promptParts: [StudioPromptPartInput!]!, $thumbnails: [StudioThumbnailInput!]!, $type: StudioType!, $workspaceId: String, $remixedFromStudioId: String, $bestForCategories: [String!], $bestForSizes: [String!], $bestForSubcategories: [String!], $shortDescription: String, $longDescription: String, $chipColor: String) {
