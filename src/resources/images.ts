@@ -118,6 +118,7 @@ export interface GenerateImageInput {
   mode?: ImageGenerationMode;
   models?: ImageGenerationModelConfigInput[];
   customModelsConfig?: ImageGenerationModelConfigInput[];
+  customModelConfigs?: ImageGenerationModelConfigInput[];
   controlImage?: ImageGenerationControlImage;
   controlImages?: ImageGenerationControlImage[] | null;
   canvasSize?: SizeInput;
@@ -596,7 +597,9 @@ export class BetaVideosResource {
 async function createGeneration(request: CreateGenerationRequest): Promise<ImageGeneration> {
   const input = request.input;
   const workspaceId = requireNonEmpty(input.workspaceId ?? request.defaultWorkspaceId, "workspaceId");
-  const customModelsConfig = normalizeGenerationModelConfigs(input.customModelsConfig ?? input.models ?? []);
+  const customModelsConfig = normalizeGenerationModelConfigs(
+    input.customModelsConfig ?? input.customModelConfigs ?? input.models ?? [],
+  );
   const prompt = normalizePromptMentions(requireNonEmpty(input.prompt, "prompt"), customModelsConfig);
   const startedAt = Date.now();
   request.logger.info(
@@ -1156,8 +1159,12 @@ function filterGenerationsPage(
 }
 
 function normalizeGenerationOutput(generation: ImageGeneration): ImageGeneration {
-  const prompt = generation.promptRaw ?? generation.promptDisplay;
   const customModelConfigs = generation.customModelConfigs?.map(normalizeGenerationCustomModelConfig);
+  const promptRaw =
+    generation.promptRaw && customModelConfigs
+      ? normalizePromptMentions(generation.promptRaw, mentionModelsFromCustomModelConfigs(customModelConfigs))
+      : generation.promptRaw;
+  const prompt = promptRaw ?? generation.promptDisplay;
   const originalImageUrls =
     generation.output
       ?.map((output) => output.originalUrl ?? output.url)
@@ -1165,11 +1172,29 @@ function normalizeGenerationOutput(generation: ImageGeneration): ImageGeneration
 
   return {
     ...generation,
+    ...(promptRaw !== undefined ? { promptRaw } : {}),
     ...(prompt !== undefined ? { prompt } : {}),
     ...(customModelConfigs ? { customModelConfigs } : {}),
     originalImageUrl: originalImageUrls[0] ?? null,
     originalImageUrls,
   };
+}
+
+interface PromptMentionModel {
+  id: string;
+  modelName?: string;
+}
+
+function mentionModelsFromCustomModelConfigs(configs: ImageGenerationCustomModelConfig[]): PromptMentionModel[] {
+  return configs
+    .map((config) => config.customModel)
+    .filter((model): model is NonNullable<ImageGenerationCustomModelConfig["customModel"]> =>
+      Boolean(model?.id && model.modelName),
+    )
+    .map((model) => ({
+      id: model.id,
+      modelName: model.modelName,
+    }));
 }
 
 function normalizeGenerationCustomModelConfig(
@@ -1229,9 +1254,9 @@ function normalizeModelConfig(model: ImageGenerationModelConfig): ImageGeneratio
   };
 }
 
-function normalizePromptMentions(prompt: string, models: ImageGenerationModelConfig[]): string {
+function normalizePromptMentions(prompt: string, models: PromptMentionModel[]): string {
   const mentionModels = models
-    .filter((model): model is ImageGenerationModelConfig & { modelName: string } => Boolean(model.modelName))
+    .filter((model): model is PromptMentionModel & { modelName: string } => Boolean(model.modelName))
     .map((model) => ({
       ...model,
       normalizedName: normalizeMentionLabel(model.modelName),
