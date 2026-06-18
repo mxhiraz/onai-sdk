@@ -286,6 +286,8 @@ export interface ImageGenerationCustomModelConfig {
   __typename?: string;
 }
 
+export type ImageGenerationModelConfigSource = CustomModel | ImageGenerationCustomModelConfig;
+
 export interface ImageGenerationUser {
   id: string;
   uid?: string;
@@ -486,18 +488,8 @@ export class ImagesResource {
     return data.userFreeImageCooldownStatus;
   }
 
-  modelConfig(model: CustomModel, imageUrl?: string): ImageGenerationModelConfig {
-    const resolvedImageUrl = imageUrl ?? model.imageOptions?.[0]?.url ?? model.thumbUrl;
-
-    if (!resolvedImageUrl) {
-      throw new OnaiValidationError("A model imageUrl is required for generation.");
-    }
-
-    return {
-      id: model.id,
-      imageUrl: resolvedImageUrl,
-      modelType: model.modelType,
-    };
+  modelConfig(model: ImageGenerationModelConfigSource, imageUrl?: string): ImageGenerationModelConfig {
+    return createModelConfig(model, imageUrl);
   }
 
   mention(model: Pick<CustomModel, "id" | "modelName">, label = model.modelName): string {
@@ -590,18 +582,8 @@ export class BetaVideosResource {
     });
   }
 
-  modelConfig(model: CustomModel, imageUrl?: string): ImageGenerationModelConfig {
-    const resolvedImageUrl = imageUrl ?? model.imageOptions?.[0]?.url ?? model.thumbUrl;
-
-    if (!resolvedImageUrl) {
-      throw new OnaiValidationError("A model imageUrl is required for generation.");
-    }
-
-    return {
-      id: model.id,
-      imageUrl: resolvedImageUrl,
-      modelType: model.modelType,
-    };
+  modelConfig(model: ImageGenerationModelConfigSource, imageUrl?: string): ImageGenerationModelConfig {
+    return createModelConfig(model, imageUrl);
   }
 
   mention(model: Pick<CustomModel, "id" | "modelName">, label = model.modelName): string {
@@ -1172,6 +1154,7 @@ function filterGenerationsPage(
 
 function normalizeGenerationOutput(generation: ImageGeneration): ImageGeneration {
   const prompt = generation.promptRaw ?? generation.promptDisplay;
+  const customModelConfigs = generation.customModelConfigs?.map(normalizeGenerationCustomModelConfig);
   const originalImageUrls =
     generation.output
       ?.map((output) => output.originalUrl ?? output.url)
@@ -1180,8 +1163,24 @@ function normalizeGenerationOutput(generation: ImageGeneration): ImageGeneration
   return {
     ...generation,
     ...(prompt !== undefined ? { prompt } : {}),
+    ...(customModelConfigs ? { customModelConfigs } : {}),
     originalImageUrl: originalImageUrls[0] ?? null,
     originalImageUrls,
+  };
+}
+
+function normalizeGenerationCustomModelConfig(
+  config: ImageGenerationCustomModelConfig,
+): ImageGenerationCustomModelConfig {
+  const originalImageUrl = firstModelImageOptionUrl(config.customModel);
+
+  if (!originalImageUrl) {
+    return config;
+  }
+
+  return {
+    ...config,
+    imageUrl: originalImageUrl,
   };
 }
 
@@ -1204,6 +1203,51 @@ function normalizeModelConfig(model: ImageGenerationModelConfig): ImageGeneratio
     imageUrl: requireNonEmpty(model.imageUrl, "models[].imageUrl"),
     modelType: model.modelType,
   };
+}
+
+function createModelConfig(source: ImageGenerationModelConfigSource, imageUrl?: string): ImageGenerationModelConfig {
+  const { model, fallbackImageUrl } = resolveModelConfigSource(source);
+  const resolvedImageUrl = imageUrl ?? firstModelImageOptionUrl(model) ?? fallbackImageUrl ?? model.thumbUrl;
+
+  if (!resolvedImageUrl) {
+    throw new OnaiValidationError("A model imageUrl is required for generation.");
+  }
+
+  return {
+    id: requireNonEmpty(model.id, "model.id"),
+    imageUrl: resolvedImageUrl,
+    modelType: model.modelType,
+  };
+}
+
+function resolveModelConfigSource(source: ImageGenerationModelConfigSource): {
+  model: CustomModel | NonNullable<ImageGenerationCustomModelConfig["customModel"]>;
+  fallbackImageUrl?: string;
+} {
+  if (isGenerationCustomModelConfig(source)) {
+    if (!source.customModel) {
+      throw new OnaiValidationError("A customModel is required for generation config reuse.");
+    }
+
+    return {
+      model: source.customModel,
+      ...(source.imageUrl !== undefined ? { fallbackImageUrl: source.imageUrl } : {}),
+    };
+  }
+
+  return {
+    model: source,
+  };
+}
+
+function isGenerationCustomModelConfig(source: ImageGenerationModelConfigSource): source is ImageGenerationCustomModelConfig {
+  return "customModel" in source || "warningSnapshot" in source;
+}
+
+function firstModelImageOptionUrl(
+  model: Pick<CustomModel, "imageOptions"> | NonNullable<ImageGenerationCustomModelConfig["customModel"]> | undefined,
+): string | undefined {
+  return model?.imageOptions?.[0]?.url;
 }
 
 function normalizeBulkRows(rows: BulkImageGenerationRowInput[]): BulkImageGenerationRowInput[] {

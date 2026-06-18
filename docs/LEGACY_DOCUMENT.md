@@ -31,7 +31,7 @@ The SDK must never run in browser code because it handles refresh tokens. Every 
 The current release path is GitHub. Install a pinned release tag in backend projects:
 
 ```bash
-npm install github:mxhiraz/onai-sdk#v0.1.17
+npm install github:mxhiraz/onai-sdk#v0.1.18
 ```
 
 In `package.json`:
@@ -39,7 +39,7 @@ In `package.json`:
 ```json
 {
   "dependencies": {
-    "onai-sdk": "github:mxhiraz/onai-sdk#v0.1.17"
+    "onai-sdk": "github:mxhiraz/onai-sdk#v0.1.18"
   }
 }
 ```
@@ -47,7 +47,7 @@ In `package.json`:
 You can also install from the HTTPS Git URL:
 
 ```bash
-npm install git+https://github.com/mxhiraz/onai-sdk.git#v0.1.17
+npm install git+https://github.com/mxhiraz/onai-sdk.git#v0.1.18
 ```
 
 The package includes a `prepare` script, so GitHub installs build `dist` automatically before the SDK is packed for the consuming project.
@@ -160,15 +160,15 @@ git push
 Optional version tag:
 
 ```bash
-git tag v0.1.17
-git push origin v0.1.17
+git tag v0.1.18
+git push origin v0.1.18
 ```
 
 Downstream apps can install a branch, tag, or commit:
 
 ```bash
 npm install github:mxhiraz/onai-sdk#main
-npm install github:mxhiraz/onai-sdk#v0.1.17
+npm install github:mxhiraz/onai-sdk#v0.1.18
 npm install git+https://github.com/mxhiraz/onai-sdk.git#<commit-sha>
 ```
 
@@ -988,6 +988,12 @@ Santos generation history requires `first` and does not accept a `search` input 
 
 Prompt mentions and model configs must stay aligned. If the prompt references a model, include that model in `models` unless a lower-level raw operation intentionally does otherwise.
 
+Model image URL rules:
+
+- `onai.images.modelConfig(model)` prefers `model.imageOptions[0].url`, then `model.thumbUrl`.
+- `onai.images.modelConfig(generation.customModelConfigs[0])` is supported for reusing a generation's returned model config; it prefers `customModel.imageOptions[0].url`, then the returned config `imageUrl`, then `customModel.thumbUrl`.
+- Returned `generation.customModelConfigs[].imageUrl` is normalized to the original model image from `customModel.imageOptions[0].url` when available. This prevents thumbnail/CDN preview URLs from becoming the next generation input.
+
 ### Batch Wait For Multiple Generations
 
 Use `waitForBatch()` when a workflow already has generation IDs. For new catalog-shoot code, prefer `bulkGenerateAndWait()` below so the SDK creates the shoot and polls the returned IDs internally.
@@ -1298,7 +1304,7 @@ Use this prompt when asking an AI coding assistant to integrate or update the SD
 ```text
 You are integrating the OnAI server-side TypeScript SDK. Keep the SDK server-only. Load refreshToken, firebaseApiKey, and workspaceId from server-side configuration or the app database for each connected account. Do not expose credentials to browser code.
 
-Use onai.auth for persisted auth token state, onai.uploads for source-image uploads, onai.products for product models, onai.characters for character models, onai.models only for listing all models, onai.studios for discovering categories/blocks and previewing/listing/creating studios, onai.images for stable image generation, and onai.beta.videos only for beta video generation. Load authTokenState from the database when creating the SDK client and save onAuthTokenChange back to the database so the SDK does not refresh auth on every request. Product and character creation can accept either an uploaded image reference or a direct upload payload with fileName, contentType, and body. Call studios.listCategories() to obtain valid reusable block IDs and studios.preview() to render ordered BLOCK/TEXT parts before creation. Call studios.list() for a deduplicated combination of workspace and global published studios, studios.listWorkspace() for workspace-only results, or studios.listGlobal() for global-only results. Use listPage() and listGlobalPage() when each scope needs its own cursor. Studio creation accepts ordered BLOCK and TEXT prompt parts; preserve their order and never inject remixedFromStudioId unless the application explicitly supplies it. Pass returned studio IDs to image generation through studioIds. Build model mentions with images.mention() and preserve their exact position in the prompt. The SDK sends generation prompts unchanged. When reading a generation, use prompt or promptRaw to retain `@[name](id)` syntax; promptDisplay is UI-only and may contain plain `@name`. For backend observability, pass logger: true or a Fastify/Pino-style logger and choose logLevel; studio category, preview, combined list, scoped list, page fetch, create, and failure events are emitted when logging is enabled. After creating a single generation, call waitFor(id) to fetch the READY generation and read originalImageUrl/originalImageUrls. For blocking catalog fan-out jobs, call bulkGenerateAndWait() so the SDK creates rows in one Santos mutation, extracts returned generation IDs, and polls direct imageGeneration(id) status calls with controlled concurrency. For fire-and-store jobs, call bulkGenerate(), store returned generation IDs, and let one backend worker call waitForBatch(ids). Keep video behind beta controls. Use exported enums instead of raw strings where possible.
+Use onai.auth for persisted auth token state, onai.uploads for source-image uploads, onai.products for product models, onai.characters for character models, onai.models only for listing all models, onai.studios for discovering categories/blocks and previewing/listing/creating studios, onai.images for stable image generation, and onai.beta.videos only for beta video generation. Load authTokenState from the database when creating the SDK client and save onAuthTokenChange back to the database so the SDK does not refresh auth on every request. Product and character creation can accept either an uploaded image reference or a direct upload payload with fileName, contentType, and body. Call studios.listCategories() to obtain valid reusable block IDs and studios.preview() to render ordered BLOCK/TEXT parts before creation. Call studios.list() for a deduplicated combination of workspace and global published studios, studios.listWorkspace() for workspace-only results, or studios.listGlobal() for global-only results. Use listPage() and listGlobalPage() when each scope needs its own cursor. Studio creation accepts ordered BLOCK and TEXT prompt parts; preserve their order and never inject remixedFromStudioId unless the application explicitly supplies it. Pass returned studio IDs to image generation through studioIds. Build model mentions with images.mention() and preserve their exact position in the prompt. The SDK sends generation prompts unchanged. When reading a generation, use prompt or promptRaw to retain `@[name](id)` syntax; promptDisplay is UI-only and may contain plain `@name`. For generation model URLs, use images.modelConfig(model) or images.modelConfig(generation.customModelConfigs[index]); the SDK prefers original model imageOptions URLs over returned thumbnail/CDN imageUrl values. For backend observability, pass logger: true or a Fastify/Pino-style logger and choose logLevel; studio category, preview, combined list, scoped list, page fetch, create, and failure events are emitted when logging is enabled. After creating a single generation, call waitFor(id) to fetch the READY generation and read originalImageUrl/originalImageUrls. For blocking catalog fan-out jobs, call bulkGenerateAndWait() so the SDK creates rows in one Santos mutation, extracts returned generation IDs, and polls direct imageGeneration(id) status calls with controlled concurrency. For fire-and-store jobs, call bulkGenerate(), store returned generation IDs, and let one backend worker call waitForBatch(ids). Keep video behind beta controls. Use exported enums instead of raw strings where possible.
 
 Preserve Santos branding in public docs and user-facing errors. Do not expose raw upstream errors. After changes, run npm run build and scan for stale stable video references, non-Santos branding, and .ts import endings.
 ```
