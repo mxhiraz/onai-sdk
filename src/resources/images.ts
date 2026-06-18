@@ -72,6 +72,7 @@ export interface ImageGenerationModelConfig {
   id: string;
   imageUrl: string;
   modelType: CustomModelType;
+  modelName?: string;
 }
 
 export interface ImageGenerationControlImage {
@@ -595,6 +596,7 @@ async function createGeneration(request: CreateGenerationRequest): Promise<Image
   const input = request.input;
   const workspaceId = requireNonEmpty(input.workspaceId ?? request.defaultWorkspaceId, "workspaceId");
   const customModelsConfig = input.customModelsConfig ?? input.models ?? [];
+  const prompt = normalizePromptMentions(requireNonEmpty(input.prompt, "prompt"), customModelsConfig);
   const startedAt = Date.now();
   request.logger.info(
     {
@@ -613,7 +615,7 @@ async function createGeneration(request: CreateGenerationRequest): Promise<Image
     operationName: "imageGenerationCreate",
     variables: {
       workspaceId,
-      prompt: requireNonEmpty(input.prompt, "prompt"),
+      prompt,
       aspectRatio: request.aspectRatio,
       styleUrls: input.styleUrls ?? [],
       mode: input.mode ?? ImageGenerationMode.Default,
@@ -1205,6 +1207,55 @@ function normalizeModelConfig(model: ImageGenerationModelConfig): ImageGeneratio
   };
 }
 
+function normalizePromptMentions(prompt: string, models: ImageGenerationModelConfig[]): string {
+  const mentionModels = models
+    .filter((model): model is ImageGenerationModelConfig & { modelName: string } => Boolean(model.modelName))
+    .map((model) => ({
+      ...model,
+      normalizedName: normalizeMentionLabel(model.modelName),
+    }))
+    .filter((model) => model.normalizedName.length > 0)
+    .sort((left, right) => right.normalizedName.length - left.normalizedName.length);
+
+  if (mentionModels.length === 0) {
+    return prompt;
+  }
+
+  return prompt.replace(/(^|[^\[])@([^\s@]+)/g, (match: string, prefix: string, token: string) => {
+    if (token.startsWith("[")) {
+      return match;
+    }
+
+    const { core, suffix } = splitMentionToken(token);
+    const normalizedToken = normalizeMentionLabel(core);
+    const model = mentionModels.find((candidate) => candidate.normalizedName === normalizedToken);
+
+    if (!model) {
+      return match;
+    }
+
+    const outsideSuffix =
+      suffix && model.modelName.endsWith(suffix) && normalizeMentionLabel(token) === model.normalizedName
+        ? ""
+        : suffix;
+
+    return `${prefix}@[${model.modelName}](${model.id})${outsideSuffix}`;
+  });
+}
+
+function splitMentionToken(token: string): { core: string; suffix: string } {
+  const match = token.match(/^(.+?)([.,!?;:)\]]*)$/);
+
+  return {
+    core: match?.[1] ?? token,
+    suffix: match?.[2] ?? "",
+  };
+}
+
+function normalizeMentionLabel(label: string): string {
+  return label.trim().replace(/[.,!?;:)\]]+$/g, "").toLowerCase();
+}
+
 function createModelConfig(source: ImageGenerationModelConfigSource, imageUrl?: string): ImageGenerationModelConfig {
   const { model, fallbackImageUrl } = resolveModelConfigSource(source);
   const resolvedImageUrl = imageUrl ?? firstModelImageOptionUrl(model) ?? fallbackImageUrl ?? model.thumbUrl;
@@ -1217,6 +1268,7 @@ function createModelConfig(source: ImageGenerationModelConfigSource, imageUrl?: 
     id: requireNonEmpty(model.id, "model.id"),
     imageUrl: resolvedImageUrl,
     modelType: model.modelType,
+    modelName: model.modelName,
   };
 }
 

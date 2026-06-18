@@ -37,6 +37,51 @@ test("images.generate preserves raw mention syntax and exposes it as the canonic
   assert.equal(generation.promptDisplay, displayPrompt);
 });
 
+test("images.generate upgrades plain prompt mentions to raw id mentions in place", async () => {
+  const product = model("2HvRX7MmrLLP0JzoMmgQ", "Vienna_Coolmint_S_Right_Side", "OBJECT");
+  const secondProduct = model("3TuUykBKTUty5OyWytvy", "Vienna_Coolmint_M_Front_Side.", "OBJECT");
+  const character = model("jfa49KkQS98b0sFzUS7U", "Kunal", "CHARACTER");
+  const rawPrompt =
+    "@[Vienna_Coolmint_S_Right_Side](2HvRX7MmrLLP0JzoMmgQ) standing right, " +
+    "@[Vienna_Coolmint_M_Front_Side.](3TuUykBKTUty5OyWytvy) standing left. " +
+    "@[Kunal](jfa49KkQS98b0sFzUS7U).. sits behind the left bag.";
+  const onai = createTestClient(async (_url, init) => {
+    const request = JSON.parse(String(init.body));
+    assert.equal(request.operationName, "imageGenerationCreate");
+    assert.equal(request.variables.prompt, rawPrompt);
+
+    return jsonResponse({
+      data: {
+        imageGenerationCreate: {
+          id: "generation-id",
+          promptRaw: rawPrompt,
+          promptDisplay:
+            "@Vienna_Coolmint_S_Right_Side standing right, @Vienna_Coolmint_M_Front_Side. standing left. @Kunal.. sits behind the left bag.",
+          status: "GENERATING",
+          workspaceId: "workspace-id",
+          output: null,
+          assetType: "IMAGE",
+          __typename: "ImageGeneration",
+        },
+      },
+    });
+  });
+
+  const generation = await onai.images.generate({
+    prompt:
+      "@Vienna_Coolmint_S_Right_Side standing right, " +
+      "@Vienna_Coolmint_M_Front_Side. standing left. " +
+      "@kunal.. sits behind the left bag.",
+    models: [
+      onai.images.modelConfig(product),
+      onai.images.modelConfig(secondProduct),
+      onai.images.modelConfig(character),
+    ],
+  });
+
+  assert.equal(generation.prompt, rawPrompt);
+});
+
 test("images.generate normalizes returned model config image urls to original model images", async () => {
   const originalImageUrl = "https://storage.example/workspace/custom-model/original.png";
   const cdnImageUrl = "https://cdn.example/workspace/products/model-id/thumb.png";
@@ -108,11 +153,13 @@ test("modelConfig accepts generation custom model configs and prefers original m
     id: "model-id",
     imageUrl: originalImageUrl,
     modelType: "OBJECT",
+    modelName: "Product",
   });
   assert.deepEqual(onai.beta.videos.modelConfig(generationModelConfig), {
     id: "model-id",
     imageUrl: originalImageUrl,
     modelType: "OBJECT",
+    modelName: "Product",
   });
 });
 
@@ -127,6 +174,21 @@ function createTestClient(fetch) {
     },
     fetch,
   });
+}
+
+function model(id, modelName, modelType) {
+  return {
+    id,
+    workspaceId: "workspace-id",
+    modelName,
+    modelType,
+    status: "READY",
+    imageOptions: [
+      {
+        url: `https://storage.example/${id}/original.png`,
+      },
+    ],
+  };
 }
 
 function jsonResponse(body) {
