@@ -80,6 +80,7 @@ export type {
   ImageGenerationAssetType,
   ImageGenerationControlImage,
   ImageGenerationModelConfig,
+  ImageGenerationModelConfigInput,
   ImageGenerationModelConfigSource,
   ImageGenerationOutput,
   ImageGenerationUser,

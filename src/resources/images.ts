@@ -116,8 +116,8 @@ export interface GenerateImageInput {
   aspectRatio?: GenerationAspectRatio;
   styleUrls?: string[];
   mode?: ImageGenerationMode;
-  models?: ImageGenerationModelConfig[];
-  customModelsConfig?: ImageGenerationModelConfig[];
+  models?: ImageGenerationModelConfigInput[];
+  customModelsConfig?: ImageGenerationModelConfigInput[];
   controlImage?: ImageGenerationControlImage;
   controlImages?: ImageGenerationControlImage[] | null;
   canvasSize?: SizeInput;
@@ -288,6 +288,7 @@ export interface ImageGenerationCustomModelConfig {
 }
 
 export type ImageGenerationModelConfigSource = CustomModel | ImageGenerationCustomModelConfig;
+export type ImageGenerationModelConfigInput = ImageGenerationModelConfig | ImageGenerationModelConfigSource;
 
 export interface ImageGenerationUser {
   id: string;
@@ -595,7 +596,7 @@ export class BetaVideosResource {
 async function createGeneration(request: CreateGenerationRequest): Promise<ImageGeneration> {
   const input = request.input;
   const workspaceId = requireNonEmpty(input.workspaceId ?? request.defaultWorkspaceId, "workspaceId");
-  const customModelsConfig = input.customModelsConfig ?? input.models ?? [];
+  const customModelsConfig = normalizeGenerationModelConfigs(input.customModelsConfig ?? input.models ?? []);
   const prompt = normalizePromptMentions(requireNonEmpty(input.prompt, "prompt"), customModelsConfig);
   const startedAt = Date.now();
   request.logger.info(
@@ -1183,6 +1184,27 @@ function normalizeGenerationCustomModelConfig(
   return {
     ...config,
     imageUrl: originalImageUrl,
+  };
+}
+
+function normalizeGenerationModelConfigs(models: ImageGenerationModelConfigInput[]): ImageGenerationModelConfig[] {
+  return models.map(normalizeGenerationModelConfigInput);
+}
+
+function normalizeGenerationModelConfigInput(model: ImageGenerationModelConfigInput): ImageGenerationModelConfig {
+  if (isGenerationCustomModelConfig(model) || !("imageUrl" in model)) {
+    return createModelConfig(model);
+  }
+
+  if (model.modelType !== "CHARACTER" && model.modelType !== "OBJECT") {
+    throw new OnaiValidationError("models[].modelType must be CHARACTER or OBJECT.");
+  }
+
+  return {
+    id: requireNonEmpty(model.id, "models[].id"),
+    imageUrl: requireNonEmpty(model.imageUrl, "models[].imageUrl"),
+    modelType: model.modelType,
+    ...(model.modelName !== undefined ? { modelName: model.modelName } : {}),
   };
 }
 

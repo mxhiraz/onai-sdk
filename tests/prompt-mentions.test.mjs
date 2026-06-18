@@ -163,6 +163,60 @@ test("modelConfig accepts generation custom model configs and prefers original m
   });
 });
 
+test("images.generate accepts returned custom model configs without sending cdn image urls", async () => {
+  const originalImageUrl = "https://storage.googleapis.com/airpict.appspot.com/workspace/custom-model/original.png";
+  const cdnImageUrl = "https://onai.b-cdn.net/workspace/products/model-id/thumb.png";
+  const generationModelConfig = {
+    customModel: {
+      id: "model-id",
+      modelName: "Product",
+      modelType: "OBJECT",
+      thumbUrl: "https://storage.googleapis.com/airpict.appspot.com/workspace/custom-model/resized.jpg",
+      imageOptions: [
+        {
+          url: originalImageUrl,
+        },
+      ],
+    },
+    imageUrl: cdnImageUrl,
+  };
+  const rawPrompt = "@[Product](model-id) in a clean studio";
+  const onai = createTestClient(async (_url, init) => {
+    const request = JSON.parse(String(init.body));
+    assert.equal(request.operationName, "imageGenerationCreate");
+    assert.equal(request.variables.prompt, rawPrompt);
+    assert.deepEqual(request.variables.customModelsConfig, [
+      {
+        id: "model-id",
+        imageUrl: originalImageUrl,
+        modelType: "OBJECT",
+      },
+    ]);
+
+    return jsonResponse({
+      data: {
+        imageGenerationCreate: {
+          id: "generation-id",
+          promptRaw: rawPrompt,
+          promptDisplay: "@Product in a clean studio",
+          status: "GENERATING",
+          workspaceId: "workspace-id",
+          output: null,
+          assetType: "IMAGE",
+          __typename: "ImageGeneration",
+        },
+      },
+    });
+  });
+
+  const generation = await onai.images.generate({
+    prompt: "@Product in a clean studio",
+    models: [generationModelConfig],
+  });
+
+  assert.equal(generation.prompt, rawPrompt);
+});
+
 function createTestClient(fetch) {
   return createOnaiClient({
     firebaseApiKey: "firebase-api-key",
