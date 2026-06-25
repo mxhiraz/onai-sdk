@@ -124,9 +124,18 @@ export interface GenerateImageInput {
   canvasSize?: SizeInput;
   objectControlMode?: string;
   studioIds?: string[];
+  isAutoStudio?: boolean;
+  creationSource?: ImageGenerationCreationSource | string;
+  studioRecommendationSources?: StudioRecommendationSourceInput[];
   samples?: ImageGenerationVersion;
   maxRes?: boolean;
   bulkGenerationId?: string;
+}
+
+export type ImageGenerationCreationSource = "CREATE_PAGE" | string;
+
+export interface StudioRecommendationSourceInput {
+  [key: string]: unknown;
 }
 
 export interface BulkImageGenerationRowInput {
@@ -230,6 +239,7 @@ export interface ImageGeneration {
   studio?: StudioListItem | null;
   deleted?: boolean;
   sourceTaskId?: string | null;
+  creationSource?: string | null;
   taskId?: string | null;
   bulkGenerationId?: string | null;
   createdBy?: ImageGenerationUser | null;
@@ -631,6 +641,9 @@ async function createGeneration(request: CreateGenerationRequest): Promise<Image
       assetType: request.assetType,
       videoOptions: request.videoOptions,
       studioIds: input.studioIds ?? [],
+      isAutoStudio: input.isAutoStudio,
+      creationSource: input.creationSource,
+      studioRecommendationSources: input.studioRecommendationSources,
       samples: request.samples ?? ImageGenerationVersion.Images1,
       maxRes: input.maxRes,
       bulkGenerationId: input.bulkGenerationId,
@@ -1448,9 +1461,9 @@ const USER_FREE_IMAGE_COOLDOWN_STATUS_QUERY = `query userFreeImageCooldownStatus
   }
 }`;
 
-const IMAGE_GENERATION_CREATE_MUTATION = `mutation imageGenerationCreate($prompt: String!, $workspaceId: String!, $aspectRatio: String, $styleUrls: [String!], $mode: String, $customModelsConfig: [CustomModelConfigInput!], $controlImage: ImageGenerationControlImageInput, $controlImages: [ImageGenerationControlImageInput!], $canvasSize: SizeInput, $objectControlMode: String, $assetType: AssetType, $videoOptions: VideoOptionsInput, $studioIds: [String!], $samples: Int, $maxRes: Boolean, $bulkGenerationId: String) {
+const IMAGE_GENERATION_CREATE_MUTATION = `mutation imageGenerationCreate($prompt: String!, $workspaceId: String!, $aspectRatio: String, $styleUrls: [String!], $mode: String, $customModelsConfig: [CustomModelConfigInput!], $controlImage: ImageGenerationControlImageInput, $controlImages: [ImageGenerationControlImageInput!], $canvasSize: SizeInput, $objectControlMode: String, $assetType: AssetType, $videoOptions: VideoOptionsInput, $studioIds: [String!], $isAutoStudio: Boolean, $samples: Int, $maxRes: Boolean, $bulkGenerationId: String, $creationSource: ImageGenerationCreationSource, $studioRecommendationSources: [StudioRecommendationSourceInput!]) {
   imageGenerationCreate(
-    input: {prompt: $prompt, workspaceId: $workspaceId, aspectRatio: $aspectRatio, styleUrls: $styleUrls, mode: $mode, customModelsConfig: $customModelsConfig, controlImage: $controlImage, controlImages: $controlImages, canvasSize: $canvasSize, objectControlMode: $objectControlMode, assetType: $assetType, videoOptions: $videoOptions, studioIds: $studioIds, samples: $samples, maxRes: $maxRes, bulkGenerationId: $bulkGenerationId}
+    input: {prompt: $prompt, workspaceId: $workspaceId, aspectRatio: $aspectRatio, styleUrls: $styleUrls, mode: $mode, customModelsConfig: $customModelsConfig, controlImage: $controlImage, controlImages: $controlImages, canvasSize: $canvasSize, objectControlMode: $objectControlMode, assetType: $assetType, videoOptions: $videoOptions, studioIds: $studioIds, isAutoStudio: $isAutoStudio, samples: $samples, maxRes: $maxRes, bulkGenerationId: $bulkGenerationId, creationSource: $creationSource, studioRecommendationSources: $studioRecommendationSources}
   ) {
     ...ImageGenerationFields
     __typename
@@ -1571,6 +1584,7 @@ fragment ImageGenerationFields on ImageGeneration {
   }
   deleted
   sourceTaskId
+  creationSource
   taskId
   bulkGenerationId
   createdBy {

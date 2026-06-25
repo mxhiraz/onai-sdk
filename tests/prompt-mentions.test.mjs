@@ -37,6 +37,47 @@ test("images.generate preserves raw mention syntax and exposes it as the canonic
   assert.equal(generation.promptDisplay, displayPrompt);
 });
 
+test("images.generate forwards current Santos studio generation metadata", async () => {
+  const rawPrompt =
+    "commercial editorial shoot with @[Product](product-id)\n#[Studio](studio-id)";
+  const onai = createTestClient(async (_url, init) => {
+    const request = JSON.parse(String(init.body));
+    assert.equal(request.operationName, "imageGenerationCreate");
+    assert.equal(request.variables.prompt, rawPrompt);
+    assert.deepEqual(request.variables.studioIds, ["studio-id"]);
+    assert.equal(request.variables.isAutoStudio, false);
+    assert.equal(request.variables.creationSource, "CREATE_PAGE");
+    assert.deepEqual(request.variables.studioRecommendationSources, []);
+
+    return jsonResponse({
+      data: {
+        imageGenerationCreate: {
+          id: "generation-id",
+          promptRaw: rawPrompt,
+          promptDisplay: "commercial editorial shoot with @Product\n#Studio",
+          status: "GENERATING",
+          workspaceId: "workspace-id",
+          output: null,
+          assetType: "IMAGE",
+          creationSource: "CREATE_PAGE",
+          __typename: "ImageGeneration",
+        },
+      },
+    });
+  });
+
+  const generation = await onai.images.generate({
+    prompt: rawPrompt,
+    studioIds: ["studio-id"],
+    isAutoStudio: false,
+    creationSource: "CREATE_PAGE",
+    studioRecommendationSources: [],
+  });
+
+  assert.equal(generation.prompt, rawPrompt);
+  assert.equal(generation.creationSource, "CREATE_PAGE");
+});
+
 test("images.generate upgrades plain prompt mentions to raw id mentions in place", async () => {
   const product = model("2HvRX7MmrLLP0JzoMmgQ", "Vienna_Coolmint_S_Right_Side", "OBJECT");
   const secondProduct = model("3TuUykBKTUty5OyWytvy", "Vienna_Coolmint_M_Front_Side.", "OBJECT");
