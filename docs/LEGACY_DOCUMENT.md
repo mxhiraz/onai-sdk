@@ -22,7 +22,7 @@ Do not create a second SDK guide. Keep examples, public API notes, maintenance r
 
 ## Executive Summary
 
-The SDK is a server-only TypeScript client for Santos image-generation workflows. It gives backend applications a typed interface for uploading source images, creating product and character AI models, listing/searching those models, creating and listing studios, generating images, checking cooldown status, and using beta video generation.
+The SDK is a server-only TypeScript client for Santos image-generation workflows. It gives backend applications a typed interface for uploading source images, creating product, character, and style AI models, listing/searching those models, creating and listing studios, generating images, checking cooldown status, and using beta video generation.
 
 The SDK must never run in browser code because it handles refresh tokens. Every integration must load user-specific credentials on the server, create a client for that user or job, call the required SDK methods, and return only safe results to the browser.
 
@@ -31,7 +31,7 @@ The SDK must never run in browser code because it handles refresh tokens. Every 
 The current release path is GitHub. Install a pinned release tag in backend projects:
 
 ```bash
-npm install github:mxhiraz/onai-sdk#v0.1.21
+npm install github:mxhiraz/onai-sdk#v0.1.23
 ```
 
 In `package.json`:
@@ -39,7 +39,7 @@ In `package.json`:
 ```json
 {
   "dependencies": {
-    "onai-sdk": "github:mxhiraz/onai-sdk#v0.1.21"
+    "onai-sdk": "github:mxhiraz/onai-sdk#v0.1.23"
   }
 }
 ```
@@ -47,7 +47,7 @@ In `package.json`:
 You can also install from the HTTPS Git URL:
 
 ```bash
-npm install git+https://github.com/mxhiraz/onai-sdk.git#v0.1.21
+npm install git+https://github.com/mxhiraz/onai-sdk.git#v0.1.23
 ```
 
 The package includes a `prepare` script, so GitHub installs build `dist` automatically before the SDK is packed for the consuming project.
@@ -104,6 +104,7 @@ The sample page can test:
 - `onai.models.list()` for inspecting all models
 - `onai.products.search()` and `onai.products.create()`
 - `onai.characters.search()` and `onai.characters.create()`
+- `onai.styles.search()` and `onai.styles.create()`
 - `onai.uploads.uploadImage()`, `onai.uploads.fromSignedUrl()`, and `onai.uploads.uploadToSignedUrl()`
 - `onai.images.list()` and `onai.images.generate()`
 - `onai.beta.videos.list()` and `onai.beta.videos.generate()`
@@ -160,15 +161,15 @@ git push
 Optional version tag:
 
 ```bash
-git tag v0.1.21
-git push origin v0.1.21
+git tag v0.1.23
+git push origin v0.1.23
 ```
 
 Downstream apps can install a branch, tag, or commit:
 
 ```bash
 npm install github:mxhiraz/onai-sdk#main
-npm install github:mxhiraz/onai-sdk#v0.1.21
+npm install github:mxhiraz/onai-sdk#v0.1.23
 npm install git+https://github.com/mxhiraz/onai-sdk.git#<commit-sha>
 ```
 
@@ -214,7 +215,7 @@ console.log(completed.id);
 console.log(completed.originalImageUrl);
 ```
 
-Generation requests also expose the current Santos browser metadata fields for studio-backed requests:
+Generation requests also expose the current Santos browser metadata fields for studio-backed and create-page requests:
 
 ```ts
 const generation = await onai.images.generate({
@@ -250,7 +251,8 @@ The stable modules are:
 | `onai.uploads` | Stable | Create upload URLs, upload source-image bytes, and parse uploaded image references. |
 | `onai.products` | Stable | Create, list, and search product models. |
 | `onai.characters` | Stable | Create, list, and search character models. |
-| `onai.models` | Stable | List products and characters together for inspection. |
+| `onai.styles` | Stable | Create, list, and search style models. |
+| `onai.models` | Stable | List products, characters, and styles together for inspection. |
 | `onai.studios` | Stable | Discover categories/blocks, preview prompt parts, create studios, and list combined workspace plus global published studios. |
 | `onai.images` | Stable | Generate images, fetch generation history/status, wait for single or batched completion, and build prompt/model helper values. |
 | `onai.generations` | Stable alias | Alias of `onai.images`. |
@@ -278,7 +280,7 @@ Do not import the SDK in frontend code. The SDK may hold refresh tokens, signed 
 
 ### Upload And Model Creation Flow
 
-Use this flow for `onai.uploads.uploadImage()`, `onai.products.create()`, and `onai.characters.create()`.
+Use this flow for `onai.uploads.uploadImage()`, `onai.products.create()`, `onai.characters.create()`, and `onai.styles.create()`.
 
 ```mermaid
 sequenceDiagram
@@ -289,18 +291,18 @@ sequenceDiagram
   participant Storage as Asset storage
 
   Device->>Backend: Submit file and model name
-  Backend->>SDK: products.create() or characters.create()
+  Backend->>SDK: products.create(), characters.create(), or styles.create()
   SDK->>GraphQL: workspaceAssetUploadUrlsCreate
   GraphQL-->>SDK: uploadUrl, filePath, uploadHeaders
   SDK->>Storage: PUT image bytes with returned headers
   Storage-->>SDK: Upload accepted
   SDK->>GraphQL: imageGenerationCustomModelCreate
   GraphQL-->>SDK: Custom model
-  SDK-->>Backend: Product or character model
+  SDK-->>Backend: Product, character, or style model
   Backend-->>Device: Safe model fields
 ```
 
-`products.create()` and `characters.create()` can accept either an existing uploaded image reference or a direct upload payload. When direct bytes are passed, the SDK handles upload URL creation and file upload before creating the model.
+`products.create()`, `characters.create()`, and `styles.create()` can accept either an existing uploaded image reference or a direct upload payload. When direct bytes are passed, the SDK handles upload URL creation and file upload before creating the model.
 
 ### Studio Flow
 
@@ -359,6 +361,8 @@ sequenceDiagram
 `generate()` starts work and returns quickly. It does not wait for output. Output URLs are usually empty until Santos marks the generation `READY`.
 
 Studio-backed generation can pass `studioIds`, `isAutoStudio`, `creationSource`, and `studioRecommendationSources` to mirror the current browser request shape. When using a studio ID, include the studio mention in the prompt itself if the generated prompt should contain it, for example `#[Studio](studioId)`.
+
+Style-backed generation can pass style models through the same `models`, `customModelsConfig`, or `customModelConfigs` fields used by products and characters. Use `onai.images.modelConfig(style)` so the SDK sends the original model image URL and `modelType: "STYLE"`.
 
 If an application fails before the `imageGenerationCreate` request appears in SDK logs, the problem is outside Santos generation creation. Common causes are backend-side reference image downloads timing out, bad local CDN URLs, missing stored auth state, or model registration failing before generation starts.
 
@@ -443,9 +447,10 @@ This pattern minimizes device load and API load. The device makes cheap requests
 | `onai.uploads` | Creates signed upload URLs, PUTs image bytes, returns `{ filePath, id }`. | Upload from the backend once, then reuse the returned image reference for create calls. | Upload URL may expire, `contentType` must match the file, storage PUT can fail, file bytes must not be empty. |
 | `onai.products` | Creates, lists, and searches product models. Products use `modelType: "OBJECT"`. | Pass direct image bytes to `products.create()` for simple flows, or pass an uploaded image reference if you already uploaded. | At least one image is required; duplicate model names may still create new models; model warnings may be returned for low-resolution or unclear product images. |
 | `onai.characters` | Creates, lists, and searches character models. Characters use `modelType: "CHARACTER"`. | Use one clear portrait/body reference when possible. Keep the returned model ID for prompt mentions. | Low-resolution faces may produce warnings; missing `imageOptions` can block generation config; character and product IDs must not be mixed in prompt config. |
-| `onai.models` | Lists all product and character models together. | Use for admin/debug screens. Use typed `products.search()` or `characters.search()` for app workflows. | Santos does not accept server-side `search` for custom models right now, so search is SDK-side after listing. Cache repeated reads if your app calls it often. |
+| `onai.styles` | Creates, lists, and searches style models. Styles use `modelType: "STYLE"`. | Use direct image bytes with `styles.create()` for style-reference setup, then pass `onai.images.modelConfig(style)` to generation. | Style models still need a source image and original `imageOptions` URL for generation config. Use style model mentions in the prompt when the style must be explicitly referenced. |
+| `onai.models` | Lists all product, character, and style models together. | Use for admin/debug screens. Use typed `products.search()`, `characters.search()`, or `styles.search()` for app workflows. | Santos does not accept server-side `search` for custom models right now, so search is SDK-side after listing. Cache repeated reads if your app calls it often. |
 | `onai.studios` | Lists categories/blocks, previews ordered prompt parts, combines workspace and global published studios, and creates studios. | Use `preview()` before creation, `list()` for combined discovery, `listWorkspace()` or `listGlobal()` for explicit scopes, and page methods for cursor UI. | Preview requires at least one valid prompt part. Combined reads make two concurrent GraphQL requests, deduplicate by studio ID with workspace records winning, and sort by usage count. |
-| `onai.images` | Generates images, bulk-generates catalog rows, reads history, polls status, checks cooldown, builds mentions and model configs. | Use `bulkGenerateAndWait()` for blocking catalog shoots, `bulkGenerate()` for fire-and-store shoots, `generate()` for one task, and `waitFor()` for one generation. | Cooldown may block usage; `originalImageUrl` is `null` until READY; rate limits can apply. `list({ ids, bulkGenerationId })` filters history SDK-side for dashboard-style reads. |
+| `onai.images` | Generates images, bulk-generates catalog rows, reads history, polls status, checks cooldown, builds mentions and model configs. | Use `bulkGenerateAndWait()` for blocking catalog shoots, `bulkGenerate()` for fire-and-store shoots, `generate()` for one task, and `waitFor()` for one generation. | Cooldown may block usage; `originalImageUrl` is `null` until READY; rate limits can apply. `list({ ids, bulkGenerationId })` filters history SDK-side for dashboard-style reads. Generation can include products, characters, styles, studio metadata, and sanitized media references. |
 | `onai.generations` | Stable alias of `onai.images`. | Use only when the word "generation" is clearer in app code. | Same behavior and edge cases as `onai.images`. |
 | `onai.beta.videos` | Beta video generation using the same generation task shape with `assetType: "VIDEO"`. | Keep behind feature flags and use worker polling. | Beta API may change; video waits may exceed normal HTTP timeouts; output may take longer than images. |
 | `onai.raw` | Sends a custom Santos GraphQL operation. | Use only for backend-only workflows not wrapped by the SDK yet. | You own the query shape, variables, pagination, and schema drift risk. Never expose raw GraphQL from public frontend routes. |
@@ -633,7 +638,7 @@ What gets logged:
 | Auth | Token refresh start, cache hit, refresh success, refresh failure. |
 | GraphQL | Operation start, sanitized variables at `trace`, success, HTTP errors, GraphQL errors, request ID, rate-limit remaining, duration. |
 | Uploads | Upload URL creation, storage PUT start/success/failure. |
-| Models | Product/character custom-model create and list operations. |
+| Models | Product/character/style custom-model create and list operations. |
 | Studios | Category reads, combined/scoped lists, page fetches, studio creation, scope, counts, duration, and failures. |
 | Images | Cooldown checks, generation create, generation history pagination, wait/poll lifecycle. |
 | Beta videos | Same generation lifecycle as images, under the beta video component. |
@@ -701,7 +706,7 @@ These examples are the canonical integration path. Keep them current whenever th
 
 ### Upload Source Image
 
-Use `uploadImage()` when the backend has image bytes. The SDK asks Santos for a signed upload URL, uploads the bytes with the required upload headers, and returns the image reference that product and character creation need.
+Use `uploadImage()` when the backend has image bytes. The SDK asks Santos for a signed upload URL, uploads the bytes with the required upload headers, and returns the image reference that product, character, and style creation need.
 
 ```ts
 const uploadedImage = await onai.uploads.uploadImage({
@@ -714,7 +719,7 @@ console.log(uploadedImage.filePath);
 console.log(uploadedImage.id);
 ```
 
-Product and character creation can also upload directly in one call:
+Product, character, and style creation can also upload directly in one call:
 
 ```ts
 const product = await onai.products.create({
@@ -732,6 +737,15 @@ const character = await onai.characters.create({
     fileName: "tom.jpg",
     contentType: "image/jpeg",
     body: characterImageBytes,
+  },
+});
+
+const style = await onai.styles.create({
+  name: "dem",
+  image: {
+    fileName: "dem-style.webp",
+    contentType: "image/webp",
+    body: styleImageBytes,
   },
 });
 ```
@@ -755,7 +769,7 @@ Use `fromSignedUrl()` only when the file has already been uploaded and the integ
 const uploadedImage = onai.uploads.fromSignedUrl(signedUrl);
 ```
 
-The returned object includes `filePath` and `id`, which can be passed to product or character creation.
+The returned object includes `filePath` and `id`, which can be passed to product, character, or style creation.
 
 ### Create Product Model
 
@@ -791,15 +805,33 @@ Characters map to Santos custom models with `modelType: "CHARACTER"`.
 
 `image` can be either an uploaded image reference from `onai.uploads.uploadImage()` or a direct upload payload with `fileName`, `contentType`, and `body`.
 
+### Create Style Model
+
+```ts
+const style = await onai.styles.create({
+  name: "dem",
+  image: uploadedImage,
+  skipTraining: true,
+});
+
+console.log(style.id);
+console.log(style.status);
+```
+
+Styles map to Santos custom models with `modelType: "STYLE"`.
+
+`image` can be either an uploaded image reference from `onai.uploads.uploadImage()` or a direct upload payload with `fileName`, `contentType`, and `body`.
+
 ### List Models And Search Typed Models
 
 ```ts
 const allModels = await onai.models.list();
 const products = await onai.products.search("shirt");
 const characters = await onai.characters.search("tom");
+const styles = await onai.styles.search("editorial");
 ```
 
-Use `onai.models.list()` only when you need to inspect everything in the workspace. Search belongs to the typed workflows: use `onai.products.search()` for product models and `onai.characters.search()` for character models. The Santos custom-model list operation currently rejects a `search` input, so typed search lists workspace models first and narrows the returned set by model text.
+Use `onai.models.list()` only when you need to inspect everything in the workspace. Search belongs to the typed workflows: use `onai.products.search()` for product models, `onai.characters.search()` for character models, and `onai.styles.search()` for style models. The Santos custom-model list operation currently rejects a `search` input, so typed search lists workspace models first and narrows the returned set by model text.
 
 ### Preview, Create, And List Studios
 
@@ -989,6 +1021,33 @@ Prompt fields:
 - `promptDisplay` is intended only for human-readable UI and may simplify mentions to `@name`.
 
 Raw `@[name](id)` mentions are sent unchanged. When you pass models built with `onai.images.modelConfig(model)`, the SDK can also upgrade matching plain mentions like `@Kunal` to `@[Kunal](model-id)` in the same position before the generation request. It does not append model tags to the end, move prompt text, or rewrite unknown `@mentions`. Never reuse `promptDisplay` as generation input when model identity must be preserved.
+
+Generate with a style model:
+
+```ts
+const [style] = await onai.styles.search("dem");
+
+const generation = await onai.images.generate({
+  prompt: `${onai.images.mention(style)} editorial lighting on ${onai.images.mention(product)}`,
+  aspectRatio: ImageGenerationAspectRatio.Portrait4x5,
+  mediaReferences: [
+    {
+      url: "https://assets.example/reference.webp",
+      mediaType: "IMAGE",
+    },
+  ],
+  models: [
+    onai.images.modelConfig(style),
+    onai.images.modelConfig(product),
+  ],
+  studioIds: [],
+  isAutoStudio: false,
+  creationSource: "CREATE_PAGE",
+  studioRecommendationSources: [],
+});
+```
+
+Style models use the same `models` / `customModelsConfig` generation path as products and characters, but their `modelType` is `"STYLE"`. The SDK strips response-only fields such as `__typename` from `mediaReferences` before sending them to Santos.
 
 You can also inspect generation history directly:
 
@@ -1323,7 +1382,7 @@ Use this prompt when asking an AI coding assistant to integrate or update the SD
 ```text
 You are integrating the OnAI server-side TypeScript SDK. Keep the SDK server-only. Load refreshToken, firebaseApiKey, and workspaceId from server-side configuration or the app database for each connected account. Do not expose credentials to browser code.
 
-Use onai.auth for persisted auth token state, onai.uploads for source-image uploads, onai.products for product models, onai.characters for character models, onai.models only for listing all models, onai.studios for discovering categories/blocks and previewing/listing/creating studios, onai.images for stable image generation, and onai.beta.videos only for beta video generation. Load authTokenState from the database when creating the SDK client and save onAuthTokenChange back to the database so the SDK does not refresh auth on every request. Product and character creation can accept either an uploaded image reference or a direct upload payload with fileName, contentType, and body. Call studios.listCategories() to obtain valid reusable block IDs and studios.preview() to render ordered BLOCK/TEXT parts before creation. Call studios.list() for a deduplicated combination of workspace and global published studios, studios.listWorkspace() for workspace-only results, or studios.listGlobal() for global-only results. Use listPage() and listGlobalPage() when each scope needs its own cursor. Studio creation accepts ordered BLOCK and TEXT prompt parts; preserve their order and never inject remixedFromStudioId unless the application explicitly supplies it. Pass returned studio IDs to image generation through studioIds; when the prompt should contain a studio reference, place `#[studio](id)` in the prompt exactly where it belongs and optionally pass isAutoStudio, creationSource, and studioRecommendationSources to mirror browser metadata. Build model mentions with images.mention() when possible and preserve their exact position in the prompt. If generation input contains plain `@name` mentions and the corresponding models were passed through images.modelConfig(model) or provided as returned generation customModelConfigs, the SDK upgrades those existing mentions in-place to `@[name](id)` before sending; it never appends or reorders model tags. When reading a generation, use prompt or promptRaw to retain `@[name](id)` syntax; promptDisplay is UI-only and may contain plain `@name`. For generation model URLs, use images.modelConfig(model), images.modelConfig(generation.customModelConfigs[index]), or pass generation.customModelConfigs directly to generate as `models` or `customModelConfigs`; the SDK prefers original model imageOptions URLs over returned thumbnail/CDN imageUrl values. For backend observability, pass logger: true or a Fastify/Pino-style logger and choose logLevel; studio category, preview, combined list, scoped list, page fetch, create, and failure events are emitted when logging is enabled. After creating a single generation, call waitFor(id) to fetch the READY generation and read originalImageUrl/originalImageUrls. For blocking catalog fan-out jobs, call bulkGenerateAndWait() so the SDK creates rows in one Santos mutation, extracts returned generation IDs, and polls direct imageGeneration(id) status calls with controlled concurrency. For fire-and-store jobs, call bulkGenerate(), store returned generation IDs, and let one backend worker call waitForBatch(ids). Keep video behind beta controls. Use exported enums instead of raw strings where possible.
+Use onai.auth for persisted auth token state, onai.uploads for source-image uploads, onai.products for product models, onai.characters for character models, onai.styles for style models, onai.models only for listing all models, onai.studios for discovering categories/blocks and previewing/listing/creating studios, onai.images for stable image generation, and onai.beta.videos only for beta video generation. Load authTokenState from the database when creating the SDK client and save onAuthTokenChange back to the database so the SDK does not refresh auth on every request. Product, character, and style creation can accept either an uploaded image reference or a direct upload payload with fileName, contentType, and body. Call studios.listCategories() to obtain valid reusable block IDs and studios.preview() to render ordered BLOCK/TEXT parts before creation. Call studios.list() for a deduplicated combination of workspace and global published studios, studios.listWorkspace() for workspace-only results, or studios.listGlobal() for global-only results. Use listPage() and listGlobalPage() when each scope needs its own cursor. Studio creation accepts ordered BLOCK and TEXT prompt parts; preserve their order and never inject remixedFromStudioId unless the application explicitly supplies it. Pass returned studio IDs to image generation through studioIds. Build product, character, and style model mentions with images.mention() when possible and preserve their exact position in the prompt. If generation input contains plain `@name` mentions and the corresponding models were passed through images.modelConfig(model) or provided as returned generation customModelConfigs, the SDK upgrades those existing mentions in-place to `@[name](id)` before sending; it never appends or reorders model tags. When reading a generation, use prompt or promptRaw to retain `@[name](id)` syntax; promptDisplay is UI-only and may contain plain `@name`. For generation model URLs, use images.modelConfig(model), images.modelConfig(generation.customModelConfigs[index]), or pass generation.customModelConfigs directly to generate as `models` or `customModelConfigs`; the SDK prefers original model imageOptions URLs over returned thumbnail/CDN imageUrl values. Style models are sent in generation `customModelsConfig` with `modelType: "STYLE"`. If you pass mediaReferences from a previous response, the SDK strips response-only fields before sending. For backend observability, pass logger: true or a Fastify/Pino-style logger and choose logLevel; studio category, preview, combined list, scoped list, page fetch, create, and failure events are emitted when logging is enabled. After creating a single generation, call waitFor(id) to fetch the READY generation and read originalImageUrl/originalImageUrls. For blocking catalog fan-out jobs, call bulkGenerateAndWait() so the SDK creates rows in one Santos mutation, extracts returned generation IDs, and polls direct imageGeneration(id) status calls with controlled concurrency. For fire-and-store jobs, call bulkGenerate(), store returned generation IDs, and let one backend worker call waitForBatch(ids). Keep video behind beta controls. Use exported enums instead of raw strings where possible.
 
 Preserve Santos branding in public docs and user-facing errors. Do not expose raw upstream errors. After changes, run npm run build and scan for stale stable video references, non-Santos branding, and .ts import endings.
 ```
@@ -1334,6 +1393,7 @@ Preserve Santos branding in public docs and user-facing errors. Do not expose ra
 |---|---|
 | Product model | A Santos custom model with `modelType: "OBJECT"`. |
 | Character model | A Santos custom model with `modelType: "CHARACTER"`. |
+| Style model | A Santos custom model with `modelType: "STYLE"`. |
 | Source image | Uploaded image used to create a custom model. |
 | Studio block | Reusable Santos prompt component referenced by `blockId`. |
 | Studio category | Group of reusable studio blocks returned by `studios.listCategories()`. |

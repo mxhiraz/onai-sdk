@@ -2,7 +2,7 @@ import { OnaiValidationError } from "./errors.js";
 import type { SantosGraphqlClient } from "./graphql.js";
 import type { ResolvedOnaiLogger } from "./logger.js";
 
-export type CustomModelType = "OBJECT" | "CHARACTER";
+export type CustomModelType = "OBJECT" | "CHARACTER" | "STYLE";
 
 export interface CustomModelImageInput {
   filePath: string;
@@ -33,6 +33,16 @@ export interface CustomModel<TModelType extends CustomModelType = CustomModelTyp
   needsEnrichment?: boolean;
   createdAt?: string;
   thumbUrl?: string | null;
+  generatedThumbnail?: {
+    status?: string | null;
+    url?: string | null;
+    __typename?: string;
+  } | null;
+  thumbnailSelection?: {
+    source?: string | null;
+    inferenceImageId?: string | null;
+    __typename?: string;
+  } | null;
   estimatedTrainingTime?: number | null;
   isDemo?: boolean;
   tokenConcept?: string | null;
@@ -55,7 +65,12 @@ export interface CustomModel<TModelType extends CustomModelType = CustomModelTyp
   sizeSetByUser?: boolean | null;
   userFeedback?: unknown;
   enrichmentMetadata?: unknown;
-  inferenceImages?: unknown[];
+  inferenceImages?: Array<{
+    id?: string;
+    url?: string | null;
+    imageAnalysis?: unknown;
+    __typename?: string;
+  }>;
   __typename?: string;
 }
 
@@ -235,6 +250,16 @@ const CUSTOM_MODEL_BASIC_FIELDS_FRAGMENT = `fragment CustomModelBasicFields on C
   needsEnrichment
   createdAt
   thumbUrl
+  generatedThumbnail {
+    status
+    url
+    __typename
+  }
+  thumbnailSelection {
+    source
+    inferenceImageId
+    __typename
+  }
   estimatedTrainingTime
   isDemo
   tokenConcept
@@ -279,6 +304,7 @@ const CUSTOM_MODEL_BASIC_FIELDS_FRAGMENT = `fragment CustomModelBasicFields on C
   }
   inferenceImages {
     id
+    url
     imageAnalysis {
       feedback {
         warning {

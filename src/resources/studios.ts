@@ -77,6 +77,7 @@ export interface StudioListItem {
   name?: string;
   published?: boolean;
   thumbnails?: StudioThumbnail[];
+  displayThumbnails?: StudioThumbnail[];
   workspaceId?: string | null;
   type?: StudioType | string;
   createdAt?: string;
@@ -671,6 +672,10 @@ const STUDIO_LIST_FIELDS_FRAGMENT = `fragment StudioListFields on Studio {
   name
   published
   thumbnails {
+    ...StudioThumbnailFields
+    __typename
+  }
+  displayThumbnails {
     ...StudioThumbnailFields
     __typename
   }

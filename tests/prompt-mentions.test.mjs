@@ -38,8 +38,7 @@ test("images.generate preserves raw mention syntax and exposes it as the canonic
 });
 
 test("images.generate forwards current Santos studio generation metadata", async () => {
-  const rawPrompt =
-    "commercial editorial shoot with @[Product](product-id)\n#[Studio](studio-id)";
+  const rawPrompt = "commercial editorial shoot with @[Product](product-id)\n#[Studio](studio-id)";
   const onai = createTestClient(async (_url, init) => {
     const request = JSON.parse(String(init.body));
     assert.equal(request.operationName, "imageGenerationCreate");

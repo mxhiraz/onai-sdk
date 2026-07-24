@@ -24,6 +24,7 @@ import {
   StudiosResource,
   StudioType,
 } from "./resources/studios.js";
+import { StylesResource } from "./resources/styles.js";
 import { UploadsResource } from "./resources/uploads.js";
 
 export { OnaiSdkError, OnaiAuthError, OnaiApiError, OnaiValidationError } from "./internal/errors.js";
@@ -131,6 +132,15 @@ export type {
   StudioThumbnailInput,
 } from "./resources/studios.js";
 export type {
+  CreateStyleInput,
+  ListStylesInput,
+  StyleCreateImageInput,
+  StyleImageInput,
+  StyleModel,
+  StyleModelType,
+  StyleUploadImageInput,
+} from "./resources/styles.js";
+export type {
   CreateWorkspaceAssetUploadUrlInput,
   CreateWorkspaceAssetUploadUrlsInput,
   UploadedImage,
@@ -151,6 +161,7 @@ export interface OnaiClient {
   models: ModelsResource;
   products: ProductsResource;
   characters: CharactersResource;
+  styles: StylesResource;
   studios: StudiosResource;
   uploads: UploadsResource;
   raw: RawResource;
@@ -221,6 +232,10 @@ export function createOnaiClient(config: OnaiClientConfig): OnaiClient {
       uploads,
     }),
     characters: new CharactersResource({
+      customModels,
+      uploads,
+    }),
+    styles: new StylesResource({
       customModels,
       uploads,
     }),

@@ -83,6 +83,12 @@ export interface ImageGenerationControlImage {
   objectRotation?: number;
 }
 
+export interface ImageGenerationMediaReference {
+  url: string;
+  mediaType?: string | null;
+  __typename?: string;
+}
+
 export interface SizeInput {
   width: number;
   height: number;
@@ -114,6 +120,7 @@ export interface GenerateImageInput {
   prompt: string;
   workspaceId?: string;
   aspectRatio?: GenerationAspectRatio;
+  mediaReferences?: ImageGenerationMediaReference[];
   styleUrls?: string[];
   mode?: ImageGenerationMode;
   models?: ImageGenerationModelConfigInput[];
@@ -223,12 +230,14 @@ export interface ImageGeneration {
   statusMessage?: string | null;
   retryable?: boolean;
   workspaceId: string;
+  customModelIds?: string[];
   output?: ImageGenerationOutput[];
   originalImageUrl?: string | null;
   originalImageUrls?: string[];
   options?: ImageGenerationOptions;
   aspectRatio?: string | null;
   styleImageUrls?: string[];
+  mediaReferences?: ImageGenerationMediaReference[];
   createdAt?: string;
   updatedAt?: string;
   objectControlMode?: string | null;
@@ -240,6 +249,7 @@ export interface ImageGeneration {
   deleted?: boolean;
   sourceTaskId?: string | null;
   creationSource?: string | null;
+  toolProvenance?: ImageGenerationToolProvenance | null;
   taskId?: string | null;
   bulkGenerationId?: string | null;
   createdBy?: ImageGenerationUser | null;
@@ -258,9 +268,18 @@ export interface ImageGenerationOutput {
   mlOptimizerName?: string | null;
   startFrameUrl?: string | null;
   startFrameOptimizedPrompt?: string | null;
+  width?: number | null;
+  height?: number | null;
   deleted?: boolean;
   deletedAt?: string | null;
   studio?: StudioListItem | null;
+  __typename?: string;
+}
+
+export interface ImageGenerationToolProvenance {
+  toolName?: string | null;
+  sourceAssetUrl?: string | null;
+  referenceImageUrls?: string[] | null;
   __typename?: string;
 }
 
@@ -281,6 +300,8 @@ export interface ImageGenerationCustomModelConfig {
     | "modelName"
     | "modelType"
     | "thumbUrl"
+    | "generatedThumbnail"
+    | "thumbnailSelection"
     | "category"
     | "subcategory"
     | "ignoreFeedback"
@@ -289,6 +310,7 @@ export interface ImageGenerationCustomModelConfig {
     | "userFeedback"
     | "enrichmentMetadata"
     | "imageOptions"
+    | "inferenceImages"
   >;
   imageUrl?: string;
   warningSnapshot?: {
@@ -620,6 +642,7 @@ async function createGeneration(request: CreateGenerationRequest): Promise<Image
       aspectRatio: request.aspectRatio,
       modelCount: customModelsConfig.length,
       mode: input.mode ?? ImageGenerationMode.Default,
+      mediaReferenceCount: input.mediaReferences?.length ?? 0,
       samples: request.samples ?? ImageGenerationVersion.Images1,
     },
     "Santos generation create started.",
@@ -631,6 +654,7 @@ async function createGeneration(request: CreateGenerationRequest): Promise<Image
       workspaceId,
       prompt,
       aspectRatio: request.aspectRatio,
+      mediaReferences: normalizeMediaReferences(input.mediaReferences),
       styleUrls: input.styleUrls ?? [],
       mode: input.mode ?? ImageGenerationMode.Default,
       customModelsConfig: customModelsConfig.map(normalizeModelConfig),
@@ -1234,8 +1258,8 @@ function normalizeGenerationModelConfigInput(model: ImageGenerationModelConfigIn
     return createModelConfig(model);
   }
 
-  if (model.modelType !== "CHARACTER" && model.modelType !== "OBJECT") {
-    throw new OnaiValidationError("models[].modelType must be CHARACTER or OBJECT.");
+  if (!isSupportedGenerationModelType(model.modelType)) {
+    throw new OnaiValidationError("models[].modelType must be CHARACTER, OBJECT, or STYLE.");
   }
 
   return {
@@ -1255,9 +1279,26 @@ function normalizeBetaVideoOptions(input: GenerateBetaVideoInput): BetaVideoOpti
   };
 }
 
+function normalizeMediaReferences(
+  mediaReferences: ImageGenerationMediaReference[] | undefined,
+): Array<Pick<ImageGenerationMediaReference, "url" | "mediaType">> {
+  if (mediaReferences === undefined) {
+    return [];
+  }
+
+  if (!Array.isArray(mediaReferences)) {
+    throw new OnaiValidationError("mediaReferences must be an array.");
+  }
+
+  return mediaReferences.map((reference, index) => ({
+    url: requireNonEmpty(reference.url, `mediaReferences[${index}].url`),
+    ...(reference.mediaType !== undefined ? { mediaType: reference.mediaType } : {}),
+  }));
+}
+
 function normalizeModelConfig(model: ImageGenerationModelConfig): ImageGenerationModelConfig {
-  if (model.modelType !== "CHARACTER" && model.modelType !== "OBJECT") {
-    throw new OnaiValidationError("models[].modelType must be CHARACTER or OBJECT.");
+  if (!isSupportedGenerationModelType(model.modelType)) {
+    throw new OnaiValidationError("models[].modelType must be CHARACTER, OBJECT, or STYLE.");
   }
 
   return {
@@ -1265,6 +1306,10 @@ function normalizeModelConfig(model: ImageGenerationModelConfig): ImageGeneratio
     imageUrl: requireNonEmpty(model.imageUrl, "models[].imageUrl"),
     modelType: model.modelType,
   };
+}
+
+function isSupportedGenerationModelType(modelType: CustomModelType): boolean {
+  return modelType === "CHARACTER" || modelType === "OBJECT" || modelType === "STYLE";
 }
 
 function normalizePromptMentions(prompt: string, models: PromptMentionModel[]): string {
@@ -1461,9 +1506,9 @@ const USER_FREE_IMAGE_COOLDOWN_STATUS_QUERY = `query userFreeImageCooldownStatus
   }
 }`;
 
-const IMAGE_GENERATION_CREATE_MUTATION = `mutation imageGenerationCreate($prompt: String!, $workspaceId: String!, $aspectRatio: String, $styleUrls: [String!], $mode: String, $customModelsConfig: [CustomModelConfigInput!], $controlImage: ImageGenerationControlImageInput, $controlImages: [ImageGenerationControlImageInput!], $canvasSize: SizeInput, $objectControlMode: String, $assetType: AssetType, $videoOptions: VideoOptionsInput, $studioIds: [String!], $isAutoStudio: Boolean, $samples: Int, $maxRes: Boolean, $bulkGenerationId: String, $creationSource: ImageGenerationCreationSource, $studioRecommendationSources: [StudioRecommendationSourceInput!]) {
+const IMAGE_GENERATION_CREATE_MUTATION = `mutation imageGenerationCreate($prompt: String!, $workspaceId: String!, $aspectRatio: String, $mediaReferences: [MediaReferenceInput!], $styleUrls: [String!], $mode: String, $customModelsConfig: [CustomModelConfigInput!], $controlImage: ImageGenerationControlImageInput, $controlImages: [ImageGenerationControlImageInput!], $canvasSize: SizeInput, $objectControlMode: String, $assetType: AssetType, $videoOptions: VideoOptionsInput, $studioIds: [String!], $isAutoStudio: Boolean, $samples: Int, $maxRes: Boolean, $bulkGenerationId: String, $creationSource: ImageGenerationCreationSource, $studioRecommendationSources: [StudioRecommendationSourceInput!]) {
   imageGenerationCreate(
-    input: {prompt: $prompt, workspaceId: $workspaceId, aspectRatio: $aspectRatio, styleUrls: $styleUrls, mode: $mode, customModelsConfig: $customModelsConfig, controlImage: $controlImage, controlImages: $controlImages, canvasSize: $canvasSize, objectControlMode: $objectControlMode, assetType: $assetType, videoOptions: $videoOptions, studioIds: $studioIds, isAutoStudio: $isAutoStudio, samples: $samples, maxRes: $maxRes, bulkGenerationId: $bulkGenerationId, creationSource: $creationSource, studioRecommendationSources: $studioRecommendationSources}
+    input: {prompt: $prompt, workspaceId: $workspaceId, aspectRatio: $aspectRatio, mediaReferences: $mediaReferences, styleUrls: $styleUrls, mode: $mode, customModelsConfig: $customModelsConfig, controlImage: $controlImage, controlImages: $controlImages, canvasSize: $canvasSize, objectControlMode: $objectControlMode, assetType: $assetType, videoOptions: $videoOptions, studioIds: $studioIds, isAutoStudio: $isAutoStudio, samples: $samples, maxRes: $maxRes, bulkGenerationId: $bulkGenerationId, creationSource: $creationSource, studioRecommendationSources: $studioRecommendationSources}
   ) {
     ...ImageGenerationFields
     __typename
@@ -1478,6 +1523,7 @@ fragment ImageGenerationFields on ImageGeneration {
   statusMessage
   retryable
   workspaceId
+  customModelIds
   output {
     id
     seed
@@ -1490,6 +1536,8 @@ fragment ImageGenerationFields on ImageGeneration {
     mlOptimizerName
     startFrameUrl
     startFrameOptimizedPrompt
+    width
+    height
     deleted
     deletedAt
     studio {
@@ -1520,6 +1568,11 @@ fragment ImageGenerationFields on ImageGeneration {
   }
   aspectRatio
   styleImageUrls
+  mediaReferences {
+    url
+    mediaType
+    __typename
+  }
   createdAt
   updatedAt
   objectControlMode
@@ -1529,6 +1582,16 @@ fragment ImageGenerationFields on ImageGeneration {
       modelName
       modelType
       thumbUrl
+      generatedThumbnail {
+        status
+        url
+        __typename
+      }
+      thumbnailSelection {
+        source
+        inferenceImageId
+        __typename
+      }
       category
       subcategory
       ignoreFeedback
@@ -1549,6 +1612,22 @@ fragment ImageGenerationFields on ImageGeneration {
       }
       imageOptions {
         url
+        __typename
+      }
+      inferenceImages {
+        id
+        url
+        imageAnalysis {
+          feedback {
+            warning {
+              key
+              message
+              __typename
+            }
+            __typename
+          }
+          __typename
+        }
         __typename
       }
       __typename
@@ -1585,6 +1664,12 @@ fragment ImageGenerationFields on ImageGeneration {
   deleted
   sourceTaskId
   creationSource
+  toolProvenance {
+    toolName
+    sourceAssetUrl
+    referenceImageUrls
+    __typename
+  }
   taskId
   bulkGenerationId
   createdBy {
@@ -1605,6 +1690,10 @@ fragment StudioListFields on Studio {
   name
   published
   thumbnails {
+    ...StudioThumbnailFields
+    __typename
+  }
+  displayThumbnails {
     ...StudioThumbnailFields
     __typename
   }
@@ -1634,6 +1723,7 @@ const IMAGE_GENERATION_LOOKUP_FIELDS_FRAGMENT = `fragment ImageGenerationLookupF
   statusMessage
   retryable
   workspaceId
+  customModelIds
   output {
     id
     seed
@@ -1646,8 +1736,14 @@ const IMAGE_GENERATION_LOOKUP_FIELDS_FRAGMENT = `fragment ImageGenerationLookupF
     mlOptimizerName
     startFrameUrl
     startFrameOptimizedPrompt
+    width
+    height
     deleted
     deletedAt
+    studio {
+      ...StudioListFields
+      __typename
+    }
     __typename
   }
   options {
@@ -1672,9 +1768,77 @@ const IMAGE_GENERATION_LOOKUP_FIELDS_FRAGMENT = `fragment ImageGenerationLookupF
   }
   aspectRatio
   styleImageUrls
+  mediaReferences {
+    url
+    mediaType
+    __typename
+  }
   createdAt
   updatedAt
   objectControlMode
+  customModelConfigs {
+    customModel {
+      id
+      modelName
+      modelType
+      thumbUrl
+      generatedThumbnail {
+        status
+        url
+        __typename
+      }
+      thumbnailSelection {
+        source
+        inferenceImageId
+        __typename
+      }
+      category
+      subcategory
+      ignoreFeedback
+      canonicalNameSetByUser
+      sizeSetByUser
+      userFeedback {
+        warning {
+          key
+          message
+          __typename
+        }
+        __typename
+      }
+      enrichmentMetadata {
+        isAmbiguousSubject
+        isAmbiguousSize
+        __typename
+      }
+      imageOptions {
+        url
+        __typename
+      }
+      inferenceImages {
+        id
+        url
+        imageAnalysis {
+          feedback {
+            warning {
+              key
+              message
+              __typename
+            }
+            __typename
+          }
+          __typename
+        }
+        __typename
+      }
+      __typename
+    }
+    imageUrl
+    warningSnapshot {
+      hadWarnings
+      __typename
+    }
+    __typename
+  }
   controlImages {
     imageUrl
     maskedControlImageUrl
@@ -1693,8 +1857,19 @@ const IMAGE_GENERATION_LOOKUP_FIELDS_FRAGMENT = `fragment ImageGenerationLookupF
   }
   assetType
   studioIds
+  studio {
+    ...StudioListFields
+    __typename
+  }
   deleted
   sourceTaskId
+  creationSource
+  toolProvenance {
+    toolName
+    sourceAssetUrl
+    referenceImageUrls
+    __typename
+  }
   taskId
   bulkGenerationId
   createdBy {
@@ -1707,6 +1882,36 @@ const IMAGE_GENERATION_LOOKUP_FIELDS_FRAGMENT = `fragment ImageGenerationLookupF
     handle
     __typename
   }
+  __typename
+}
+
+fragment StudioListFields on Studio {
+  id
+  name
+  published
+  thumbnails {
+    ...StudioThumbnailFields
+    __typename
+  }
+  displayThumbnails {
+    ...StudioThumbnailFields
+    __typename
+  }
+  workspaceId
+  type
+  createdAt
+  usageCount
+  isProductShotTemplate
+  remixedFromStudioId
+  bestForCategories
+  bestForSizes
+  bestForSubcategories
+  shotNewSubcategories
+  __typename
+}
+
+fragment StudioThumbnailFields on StudioThumbnail {
+  url
   __typename
 }`;
 
@@ -1739,88 +1944,10 @@ const IMAGE_GENERATIONS_QUERY = `query imageGenerations($workspaceId: String!, $
       __typename
     }
     imageGenerations {
-      id
-      promptRaw
-      promptDisplay
-      status
-      statusMessage
-      retryable
-      workspaceId
-      output {
-        id
-        seed
-        url
-        originalUrl
-        thumbnailUrl
-        durationMs
-        displayModelName
-        optimizedPrompt
-        mlOptimizerName
-        startFrameUrl
-        startFrameOptimizedPrompt
-        deleted
-        deletedAt
-        __typename
-      }
-      options {
-        samples
-        maxRes
-        mode
-        studioIds
-        videoOptions {
-          startFrameUrl
-          endFrameUrl
-          cameraMotion
-          duration
-          withAudio
-          __typename
-        }
-        canvasSize {
-          width
-          height
-          __typename
-        }
-        __typename
-      }
-      aspectRatio
-      styleImageUrls
-      createdAt
-      updatedAt
-      objectControlMode
-      controlImages {
-        imageUrl
-        maskedControlImageUrl
-        objectSize {
-          width
-          height
-          __typename
-        }
-        objectPosition {
-          x
-          y
-          __typename
-        }
-        objectRotation
-        __typename
-      }
-      assetType
-      studioIds
-      deleted
-      sourceTaskId
-      taskId
-      bulkGenerationId
-      createdBy {
-        id
-        uid
-        email
-        displayName
-        firstName
-        photoURL
-        handle
-        __typename
-      }
-      __typename
+      ...ImageGenerationLookupFields
     }
     __typename
   }
-}`;
+}
+
+${IMAGE_GENERATION_LOOKUP_FIELDS_FRAGMENT}`;
